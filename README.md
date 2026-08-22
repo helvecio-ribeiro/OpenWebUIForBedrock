@@ -1,4 +1,10 @@
-# Open WebUI 👋
+# Open WebUI for AWS Bedrock
+
+This repository is a project-specific fork of [Open WebUI](https://github.com/open-webui/open-webui) with native AWS Bedrock model discovery and chat support.
+
+The upstream project provides the core chat application, frontend, Ollama integration, OpenAI-compatible providers, workspace features, and general documentation. This fork adds a small Bedrock integration that discovers AWS foundation models and inference profiles, exposes them in the model selector, and invokes supported models through the Bedrock Converse APIs.
+
+For upstream features, configuration, and general troubleshooting, see the [Open WebUI repository](https://github.com/open-webui/open-webui) and [Open WebUI documentation](https://docs.openwebui.com/).
 
 ![GitHub stars](https://img.shields.io/github/stars/open-webui/open-webui?style=social)
 ![GitHub forks](https://img.shields.io/github/forks/open-webui/open-webui?style=social)
@@ -108,6 +114,111 @@ Want to learn more? Check out our [Open WebUI documentation](https://docs.openwe
 We are incredibly grateful for the generous support of our sponsors. Their contributions help us to maintain and improve our project, ensuring we can continue to deliver quality work to our community. Thank you!
 
 ## How to Install 🚀
+
+## Run From Source
+
+These instructions run this fork directly from the checked-out source tree. Docker is not required.
+
+### Requirements
+
+- Linux or macOS
+- Python 3.11 or 3.12
+- Node.js 18.13 through 22.x
+- npm
+
+### Backend setup
+
+From the repository root:
+
+```bash
+cd backend
+python3.11 -m venv venv
+./venv/bin/python -m pip install --upgrade pip
+./venv/bin/python -m pip install -r requirements.txt
+```
+
+If the repository already contains `backend/venv`, reuse it instead of creating another environment.
+
+### Frontend setup
+
+In a second terminal, from the repository root:
+
+```bash
+npm install
+```
+
+### AWS Bedrock configuration
+
+Bedrock support is disabled by default. Add the following to `.env` in the repository root:
+
+```env
+ENABLE_BEDROCK=true
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+```
+
+For temporary AWS credentials, also add:
+
+```env
+AWS_SESSION_TOKEN=your-session-token
+```
+
+The backend loads these values at startup and passes them explicitly to boto3. The access key and secret must belong to the same active AWS credential set. The AWS identity needs permission to list models and inference profiles:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "bedrock:ListFoundationModels",
+    "bedrock:ListInferenceProfiles",
+    "bedrock:InvokeModel",
+    "bedrock:InvokeModelWithResponseStream"
+  ],
+  "Resource": "*"
+}
+```
+
+The corresponding Bedrock models must also be enabled for the AWS account and region. Long-lived keys should not be committed to `.env`; use an IAM role or another secure credential provider for production.
+
+### Start the source application
+
+Start the backend from `backend/`:
+
+```bash
+cd backend
+./start.sh
+```
+
+The backend serves on [http://localhost:8080](http://localhost:8080) by default. To run the Vite frontend during development, use a second terminal:
+
+```bash
+npm run dev
+```
+
+The development frontend is normally available at [http://localhost:5173](http://localhost:5173). For the simplest source-based test, use the backend-served application at port 8080.
+
+When Bedrock is enabled, refresh the model list after startup. Models requiring on-demand throughput are omitted from direct selection; AWS inference profiles are listed using IDs such as `us.anthropic...` and should be selected for models such as Amazon Nova that require profile-based invocation.
+
+### Verify AWS access before starting the backend
+
+Use the same project interpreter to verify that boto3 can authenticate:
+
+```bash
+cd backend
+PYTHONPATH=. ./venv/bin/python - <<'PY'
+import boto3
+import open_webui.env
+
+session = boto3.Session(
+    region_name=open_webui.env.AWS_REGION,
+    **open_webui.env.AWS_CREDENTIALS,
+)
+print(session.client('sts').get_caller_identity()['Arn'])
+PY
+```
+
+If this command succeeds but no Bedrock models appear, check the backend log for IAM permissions, regional model access, or inference-profile availability.
 
 ### Installation via Python pip 🐍
 
