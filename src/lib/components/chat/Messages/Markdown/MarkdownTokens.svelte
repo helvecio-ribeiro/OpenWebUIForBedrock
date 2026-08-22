@@ -399,14 +399,14 @@
 							attributes={detailToken.attributes}
 							resultContent={getDetailTextContent(detailToken)}
 							grouped={true}
-							open={$settings?.expandDetails ?? false}
+							open={$settings?.expandDetails ?? true}
 							className="w-full"
 							buttonClassName={detailButtonClassName}
 						/>
 					{:else if textContent.length > 0}
 						<Collapsible
 							title={detailToken.summary}
-							open={$settings?.expandDetails ?? false}
+							open={$settings?.expandDetails ?? true}
 							attributes={detailToken?.attributes}
 							messageDone={done}
 							className="w-full"
@@ -452,14 +452,14 @@
 				id={`${id}-${tokenIdx}-tc`}
 				attributes={token.attributes}
 				resultContent={getDetailTextContent(token)}
-				open={$settings?.expandDetails ?? false}
+				open={$settings?.expandDetails ?? true}
 				className="w-full space-y-2"
 				buttonClassName={detailButtonClassName}
 			/>
 		{:else if textContent.length > 0}
 			<Collapsible
 				title={token.summary}
-				open={$settings?.expandDetails ?? false}
+				open={$settings?.expandDetails ?? true}
 				attributes={token?.attributes}
 				messageDone={done}
 				className="w-full space-y-2"

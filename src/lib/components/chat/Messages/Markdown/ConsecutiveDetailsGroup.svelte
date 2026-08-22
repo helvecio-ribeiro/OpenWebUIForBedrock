@@ -33,7 +33,7 @@
 	export let allowEmbeds = true;
 	export let compactPreview = false;
 
-	let open = $settings?.expandDetails ?? false;
+	let open = $settings?.expandDetails ?? true;
 
 	function parseJSONString(str: string) {
 		try {

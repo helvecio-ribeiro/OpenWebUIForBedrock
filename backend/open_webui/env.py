@@ -804,6 +804,33 @@ BYPASS_PYDUB_PREPROCESSING = os.getenv('BYPASS_PYDUB_PREPROCESSING', 'False').lo
 # is blocked. Enable only if you need direct passthrough to upstream OpenAI-
 # compatible APIs for endpoints not natively handled by Open WebUI.
 ENABLE_OPENAI_API_PASSTHROUGH = os.getenv('ENABLE_OPENAI_API_PASSTHROUGH', 'False').lower() == 'true'
+ENABLE_BEDROCK = os.getenv('ENABLE_BEDROCK', 'False').lower() == 'true'
+AWS_CREDENTIALS = {
+    'aws_access_key_id': os.getenv('AWS_ACCESS_KEY_ID'),
+    'aws_secret_access_key': os.getenv('AWS_SECRET_ACCESS_KEY'),
+    'aws_session_token': os.getenv('AWS_SESSION_TOKEN'),
+}
+AWS_REGION = os.getenv('BEDROCK_REGION') or os.getenv('AWS_REGION') or os.getenv('AWS_DEFAULT_REGION')
+
+if ENABLE_BEDROCK:
+    try:
+        missing_bedrock_env = [
+            name
+            for name, value in (
+                ('AWS_ACCESS_KEY_ID', AWS_CREDENTIALS['aws_access_key_id']),
+                ('AWS_SECRET_ACCESS_KEY', AWS_CREDENTIALS['aws_secret_access_key']),
+                ('AWS_REGION', AWS_REGION),
+            )
+            if not value
+        ]
+        if missing_bedrock_env:
+            raise RuntimeError(
+                'ENABLE_BEDROCK=true requires these environment variables: '
+                + ', '.join(missing_bedrock_env)
+            )
+    except RuntimeError as exc:
+        print(f'Bedrock configuration error: {exc}', file=sys.stderr)
+        raise SystemExit(1)
 
 WEBUI_AUTH_SIGNOUT_REDIRECT_URL = os.getenv('WEBUI_AUTH_SIGNOUT_REDIRECT_URL', None)
 

@@ -70,7 +70,7 @@
 	let collapseCodeBlocks = false;
 	let renderMarkdownInUserMessages = true;
 	let renderMarkdownInAssistantMessages = true;
-	let expandDetails = false;
+	let expandDetails = true;
 	let renderMarkdownInPreviews = true;
 	let showChatTitleInTab = true;
 
@@ -246,7 +246,7 @@
 		collapseCodeBlocks = $settings?.collapseCodeBlocks ?? false;
 		renderMarkdownInUserMessages = $settings?.renderMarkdownInUserMessages ?? true;
 		renderMarkdownInAssistantMessages = $settings?.renderMarkdownInAssistantMessages ?? true;
-		expandDetails = $settings?.expandDetails ?? false;
+		expandDetails = $settings?.expandDetails ?? true;
 		renderMarkdownInPreviews = $settings?.renderMarkdownInPreviews ?? true;
 
 		landingPageMode = $settings?.landingPageMode ?? '';

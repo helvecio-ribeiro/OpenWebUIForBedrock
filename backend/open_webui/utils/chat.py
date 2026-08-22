@@ -16,6 +16,7 @@ from open_webui.models.users import UserModel
 from open_webui.routers.ollama import (
     generate_chat_completion as generate_ollama_chat_completion,
 )
+from open_webui.routers.bedrock import generate_chat_completion as generate_bedrock_chat_completion
 from open_webui.routers.openai import (
     generate_chat_completion as generate_openai_chat_completion,
 )
@@ -299,6 +300,12 @@ async def generate_chat_completion(
                 )
             else:
                 return convert_response_ollama_to_openai(response)
+        elif model.get('owned_by') == 'bedrock':
+            return await generate_bedrock_chat_completion(
+                request=request,
+                form_data=form_data,
+                user=user,
+            )
         else:
             return await generate_openai_chat_completion(
                 request=request,

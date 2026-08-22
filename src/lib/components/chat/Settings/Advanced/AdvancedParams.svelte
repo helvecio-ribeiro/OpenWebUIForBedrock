@@ -17,8 +17,8 @@
 
 	const defaultParams = {
 		// Advanced
-		stream_response: null, // Set stream responses for this model individually
-		stream_delta_chunk_size: null, // Set the chunk size for streaming responses
+		stream_response: true, // Set stream responses for this model individually
+		stream_delta_chunk_size: 1, // Set the chunk size for streaming responses
 		compact_token_threshold: null,
 		function_calling: null,
 		reasoning_tags: null,
@@ -54,6 +54,12 @@
 
 	export let params: any = defaultParams;
 	$: if (params) {
+		if (params.stream_response == null) {
+			params.stream_response = true;
+		}
+		if (params.stream_delta_chunk_size == null) {
+			params.stream_delta_chunk_size = 1;
+		}
 		onChange(params);
 	}
 

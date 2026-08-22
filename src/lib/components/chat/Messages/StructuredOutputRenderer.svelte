@@ -80,14 +80,14 @@
 							attributes={detailToken.attributes}
 							resultContent={detailToken.text}
 							grouped={true}
-							open={$settings?.expandDetails ?? false}
+							open={$settings?.expandDetails ?? true}
 							className="w-full"
 							buttonClassName={detailButtonClassName}
 						/>
 					{:else if detailToken.text?.length > 0}
 						<Collapsible
 							title={getDetailTitle(detailToken)}
-							open={$settings?.expandDetails ?? false}
+							open={$settings?.expandDetails ?? true}
 							attributes={getDetailAttributes(detailToken)}
 							messageDone={done}
 							className="w-full"
@@ -127,14 +127,14 @@
 				id={`${id}-${displayItem.id}-tool-call`}
 				attributes={detailToken.attributes}
 				resultContent={detailToken.text}
-				open={$settings?.expandDetails ?? false}
+				open={$settings?.expandDetails ?? true}
 				className="w-full space-y-2"
 				buttonClassName={detailButtonClassName}
 			/>
 		{:else if detailToken.text?.length > 0}
 			<Collapsible
 				title={getDetailTitle(detailToken)}
-				open={$settings?.expandDetails ?? false}
+				open={$settings?.expandDetails ?? true}
 				attributes={getDetailAttributes(detailToken)}
 				messageDone={done}
 				className="w-full space-y-2"

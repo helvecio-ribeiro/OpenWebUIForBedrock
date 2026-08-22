@@ -33,8 +33,8 @@
 
 	let params = {
 		// Advanced
-		stream_response: null,
-		stream_delta_chunk_size: null,
+		stream_response: true,
+		stream_delta_chunk_size: 1,
 		function_calling: null,
 		reasoning_tags: null,
 		seed: null,
@@ -121,7 +121,12 @@
 
 		system = $settings.system ?? '';
 
-		params = { ...params, ...$settings.params };
+		params = {
+			...params,
+			...$settings.params,
+			stream_response: $settings?.params?.stream_response ?? true,
+			stream_delta_chunk_size: $settings?.params?.stream_delta_chunk_size ?? 1
+		};
 		params.stop = $settings?.params?.stop ? ($settings?.params?.stop ?? []).join(',') : null;
 	});
 

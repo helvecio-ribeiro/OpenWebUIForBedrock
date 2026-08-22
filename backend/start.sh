@@ -96,7 +96,11 @@ fi
 
 # ── Launch uvicorn ───────────────────────────────────────────────────────────
 
-PYTHON_CMD=$(command -v python3 || command -v python)
+if [[ -x "$SCRIPT_DIR/venv/bin/python" ]]; then
+  PYTHON_CMD="$SCRIPT_DIR/venv/bin/python"
+else
+  PYTHON_CMD=$(command -v python3 || command -v python)
+fi
 UVICORN_WORKERS="${UVICORN_WORKERS:-1}"
 
 if [[ "$#" -gt 0 ]]; then

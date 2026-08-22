@@ -9,7 +9,7 @@ from open_webui.config import (
     BYPASS_ADMIN_ACCESS_CONTROL,
     DEFAULT_ARENA_MODEL,
 )
-from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, ENABLE_PLUGINS, GLOBAL_LOG_LEVEL
+from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, ENABLE_BEDROCK, ENABLE_PLUGINS, GLOBAL_LOG_LEVEL
 from open_webui.functions import get_function_models
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
@@ -18,7 +18,7 @@ from open_webui.models.groups import Groups
 from open_webui.models.models import Models
 from open_webui.utils.chat_variables import get_chat_variables_schema
 from open_webui.models.users import UserModel
-from open_webui.routers import ollama, openai
+from open_webui.routers import bedrock, ollama, openai
 from open_webui.socket.utils import RedisDict
 from open_webui.utils.access_control import has_access, has_base_model_access
 from open_webui.utils.plugin import (
@@ -53,15 +53,22 @@ async def fetch_openai_models(request: Request, user: UserModel = None):
     return openai_response['data']
 
 
+async def fetch_bedrock_models(request: Request, user: UserModel = None):
+    return await bedrock.get_all_models(request, user=user)
+
+
 async def get_all_base_models(request: Request, user: UserModel = None):
     config = await Config.get_many('openai.enable', 'ollama.enable')
     openai_task = fetch_openai_models(request, user) if config.get('openai.enable') else asyncio.sleep(0, result=[])
     ollama_task = fetch_ollama_models(request, user) if config.get('ollama.enable') else asyncio.sleep(0, result=[])
+    bedrock_task = fetch_bedrock_models(request, user) if ENABLE_BEDROCK else asyncio.sleep(0, result=[])
     function_task = get_function_models(request)
 
-    openai_models, ollama_models, function_models = await asyncio.gather(openai_task, ollama_task, function_task)
+    openai_models, ollama_models, bedrock_models, function_models = await asyncio.gather(
+        openai_task, ollama_task, bedrock_task, function_task
+    )
 
-    return function_models + openai_models + ollama_models
+    return function_models + openai_models + ollama_models + bedrock_models
 
 
 async def get_all_models(request, refresh: bool = False, user: UserModel = None):

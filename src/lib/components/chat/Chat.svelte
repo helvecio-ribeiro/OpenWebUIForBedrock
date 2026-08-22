@@ -392,6 +392,12 @@
 	let loadedChatIdProp = '';
 	let currentDraftKey = '';
 
+	const getNewChatParams = () => ({
+		...($settings?.params ?? {}),
+		stream_response: $settings?.params?.stream_response ?? true,
+		stream_delta_chunk_size: $settings?.params?.stream_delta_chunk_size ?? 1
+	});
+
 	const mergeChatVariableSchemas = (modelIds = [], availableModels = []) => {
 		const byKey: Record<string, any> = {};
 		const conflicts: any[] = [];
@@ -482,12 +488,26 @@
 	};
 
 	let oldSelectedModelIds = [''];
+	let changingModelChat = false;
 	$: if (!equal(selectedModelIds, oldSelectedModelIds)) {
 		onSelectedModelIdsChange();
 	}
 
 	const onSelectedModelIdsChange = () => {
 		resetInput();
+
+		if (!loading && $chatId && !$temporaryChatEnabled && !changingModelChat) {
+			const nextSelectedModels = structuredClone(selectedModels);
+			changingModelChat = true;
+			void initNewChat()
+				.then(() => {
+					selectedModels = nextSelectedModels;
+				})
+				.finally(() => {
+					changingModelChat = false;
+				});
+		}
+
 		oldSelectedModelIds = structuredClone(selectedModelIds);
 	};
 
@@ -634,7 +654,7 @@
 			messages: {},
 			currentId: null
 		};
-		params = {};
+		params = getNewChatParams();
 		chatVariables = {};
 		chatFiles = [];
 		files = [];
@@ -1827,7 +1847,7 @@
 		};
 
 		chatFiles = [];
-		params = {};
+		params = getNewChatParams();
 		chatVariables = {};
 		taskIds = null;
 		chatTasks = [];
