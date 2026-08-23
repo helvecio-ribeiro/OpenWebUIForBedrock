@@ -152,6 +152,7 @@ ENABLE_BEDROCK=true
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=your-access-key-id
 AWS_SECRET_ACCESS_KEY=your-secret-access-key
+BEDROCK_CONVERSE_MODEL_PREFIXES=ai21.jamba-,amazon.nova-,anthropic.claude-,cohere.command-,deepseek.,google.gemma-,meta.llama,minimax.,mistral.,moonshot.,nvidia.,openai.,qwen.,writer.palmyra-,xai.grok-,zai.glm-
 ```
 
 For temporary AWS credentials, also add:
@@ -159,6 +160,53 @@ For temporary AWS credentials, also add:
 ```env
 AWS_SESSION_TOKEN=your-session-token
 ```
+
+Only text-chat models compatible with this integration's Bedrock Converse API
+are shown. Discovery requires both `TEXT` input and `TEXT` output, then checks
+the foundation model ID against the comma-separated
+`BEDROCK_CONVERSE_MODEL_PREFIXES` allowlist.
+
+The default allowlist currently covers these Bedrock model families:
+
+| Provider | Model ID prefix |
+| --- | --- |
+| AI21 Labs | `ai21.jamba-` |
+| Amazon | `amazon.nova-` |
+| Anthropic | `anthropic.claude-` |
+| Cohere | `cohere.command-` |
+| DeepSeek | `deepseek.` |
+| Google | `google.gemma-` |
+| Meta | `meta.llama` |
+| MiniMax | `minimax.` |
+| Mistral AI | `mistral.` |
+| Moonshot AI | `moonshot.` |
+| NVIDIA | `nvidia.` |
+| OpenAI | `openai.` |
+| Qwen | `qwen.` |
+| Writer | `writer.palmyra-` |
+| xAI | `xai.grok-` |
+| Z.AI | `zai.glm-` |
+
+Inference profiles are shown only when at least one of their referenced
+foundation models has text input and output and matches the same allowlist. To
+add a newly supported model or restrict the selector further, set the complete
+replacement list in `.env`:
+
+```env
+BEDROCK_CONVERSE_MODEL_PREFIXES=amazon.nova-,anthropic.claude-
+```
+
+The environment variable replaces the complete default list; it does not append
+to it. Entries are matched against the beginning of the AWS foundation model
+ID, are case-sensitive, and should not include the `bedrock:` prefix used by
+Open WebUI. Whitespace around comma-separated entries is ignored. An empty value
+hides all Bedrock models.
+
+AWS does not return Converse compatibility in `ListFoundationModels`. Before
+adding a prefix, confirm that the model supports `Converse` or `ConverseStream`
+in AWS's model/API compatibility documentation. A prefix may cover non-chat
+models from the same family, but the required text input/output checks keep
+those models out of the selector.
 
 The backend loads these values at startup and passes them explicitly to boto3. The access key and secret must belong to the same active AWS credential set. The AWS identity needs permission to list models and inference profiles:
 

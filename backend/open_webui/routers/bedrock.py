@@ -10,7 +10,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
-from open_webui.env import AWS_CREDENTIALS, AWS_REGION
+from open_webui.env import AWS_CREDENTIALS, AWS_REGION, BEDROCK_CONVERSE_MODEL_PREFIXES
 
 log = logging.getLogger(__name__)
 
@@ -25,8 +25,45 @@ def _list_foundation_models() -> list[dict]:
 def _list_inference_profiles() -> list[dict]:
     session = boto3.Session(region_name=AWS_REGION, **AWS_CREDENTIALS)
     client = session.client('bedrock')
-    response = client.list_inference_profiles()
-    return response.get('inferenceProfileSummaries', [])
+    profiles = []
+    next_token = None
+    while True:
+        request = {'nextToken': next_token} if next_token else {}
+        response = client.list_inference_profiles(**request)
+        profiles.extend(response.get('inferenceProfileSummaries', []))
+        next_token = response.get('nextToken')
+        if not next_token:
+            return profiles
+
+
+def _foundation_model_id(model: dict) -> str:
+    model_id = model.get('modelId')
+    if model_id:
+        return model_id
+
+    model_arn = model.get('modelArn', '')
+    marker = 'foundation-model/'
+    return model_arn.split(marker, 1)[1] if marker in model_arn else ''
+
+
+def _supports_converse(model_id: str) -> bool:
+    return bool(model_id) and model_id.startswith(BEDROCK_CONVERSE_MODEL_PREFIXES)
+
+
+def _supports_text_chat(summary: dict) -> bool:
+    return (
+        _supports_converse(_foundation_model_id(summary))
+        and 'TEXT' in summary.get('inputModalities', [])
+        and 'TEXT' in summary.get('outputModalities', [])
+    )
+
+
+def _profile_supports_text_chat(profile: dict, summaries_by_id: dict[str, dict]) -> bool:
+    return any(
+        _supports_text_chat(summaries_by_id[model_id])
+        for model in profile.get('models', [])
+        if (model_id := _foundation_model_id(model)) in summaries_by_id
+    )
 
 
 def _bedrock_model_id(model_id: str) -> str:
@@ -162,9 +199,20 @@ async def get_all_models(request: Request, user=None) -> list[dict]:
         profiles = []
 
     models = []
+    summaries_by_id = {
+        model_id: summary
+        for summary in summaries
+        if (model_id := _foundation_model_id(summary))
+    }
     for summary in summaries:
         model_id = summary.get('modelId')
         if not model_id:
+            continue
+
+        # ListFoundationModels exposes modalities but not Converse API
+        # compatibility. Keep only text-in/text-out models whose IDs match the
+        # configurable Converse allowlist.
+        if not _supports_text_chat(summary):
             continue
 
         # Models without on-demand support must be invoked through an
@@ -195,7 +243,7 @@ async def get_all_models(request: Request, user=None) -> list[dict]:
 
     for profile in profiles:
         profile_id = profile.get('inferenceProfileId')
-        if not profile_id:
+        if not profile_id or not _profile_supports_text_chat(profile, summaries_by_id):
             continue
 
         profile_name = profile.get('inferenceProfileName') or profile_id

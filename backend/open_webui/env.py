@@ -805,6 +805,16 @@ BYPASS_PYDUB_PREPROCESSING = os.getenv('BYPASS_PYDUB_PREPROCESSING', 'False').lo
 # compatible APIs for endpoints not natively handled by Open WebUI.
 ENABLE_OPENAI_API_PASSTHROUGH = os.getenv('ENABLE_OPENAI_API_PASSTHROUGH', 'False').lower() == 'true'
 ENABLE_BEDROCK = os.getenv('ENABLE_BEDROCK', 'False').lower() == 'true'
+BEDROCK_CONVERSE_MODEL_PREFIXES = tuple(
+    prefix.strip()
+    for prefix in os.getenv(
+        'BEDROCK_CONVERSE_MODEL_PREFIXES',
+        'ai21.jamba-,amazon.nova-,anthropic.claude-,cohere.command-,deepseek.,google.gemma-,'
+        'meta.llama,minimax.,mistral.,moonshot.,nvidia.,openai.,qwen.,writer.palmyra-,'
+        'xai.grok-,zai.glm-',
+    ).split(',')
+    if prefix.strip()
+)
 AWS_CREDENTIALS = {
     'aws_access_key_id': os.getenv('AWS_ACCESS_KEY_ID'),
     'aws_secret_access_key': os.getenv('AWS_SECRET_ACCESS_KEY'),
