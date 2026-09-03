@@ -15,7 +15,7 @@
 
 	import { createPicker, getAuthToken } from '$lib/utils/google-drive-picker';
 	import { pickAndDownloadFile } from '$lib/utils/onedrive-file-picker';
-	import { KokoroWorker } from '$lib/workers/KokoroWorker';
+	import { getOrInitKokoroWorker, resolveKokoroVoiceId } from '$lib/utils/kokoro';
 
 	const dispatch = createEventDispatcher();
 
@@ -34,7 +34,6 @@
 		showControls,
 		showSettings,
 		selectedTerminalId,
-		TTSWorker,
 		temporaryChatEnabled
 	} from '$lib/stores';
 
@@ -2366,16 +2365,14 @@
 																stream = null;
 
 																if ($settings.audio?.tts?.engine === 'browser-kokoro') {
-																	// If the user has not initialized the TTS worker, initialize it
-																	if (!$TTSWorker) {
-																		await TTSWorker.set(
-																			new KokoroWorker({
-																				dtype: $settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
-																			})
-																		);
-
-																		await $TTSWorker.init();
-																	}
+																			await getOrInitKokoroWorker(
+																				$settings.audio?.tts?.engineConfig?.dtype ?? 'q8',
+																				$config.features?.kokoro_device ?? 'auto',
+																				resolveKokoroVoiceId(
+																					$config.features?.kokoro_default_voice ??
+																						$settings.audio?.tts?.voice
+																				)
+																			);
 																}
 
 																showCallOverlay.set(true);

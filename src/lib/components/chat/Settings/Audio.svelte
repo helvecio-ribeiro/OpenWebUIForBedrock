@@ -12,6 +12,7 @@
 	import UserSettingRow from './UserSettingRow.svelte';
 	import SettingsSelect from '$lib/components/common/SettingsSelect.svelte';
 	import UserSettingSection from './UserSettingSection.svelte';
+	import { getKokoroDevice, resolveKokoroVoiceId } from '$lib/utils/kokoro';
 	const dispatch = createEventDispatcher();
 
 	const i18n = getContext('i18n');
@@ -33,6 +34,7 @@
 	let TTSModel = null;
 	let TTSModelProgress = null;
 	let TTSModelLoading = false;
+	let TTSModelError = '';
 
 	let voices = [];
 	let voice = '';
@@ -99,11 +101,23 @@
 
 		TTSEngine = $settings?.audio?.tts?.engine ?? '';
 		TTSEngineConfig = $settings?.audio?.tts?.engineConfig ?? {};
+		if ($config.features?.enable_kokoro_preload) {
+			TTSEngine = 'browser-kokoro';
+			TTSEngineConfig = {
+				...TTSEngineConfig,
+				dtype: $config.features.kokoro_preload_dtype ?? 'q8'
+			};
+		}
 
 		if ($settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice) {
 			voice = $settings?.audio?.tts?.voice ?? $config.audio.tts.voice ?? '';
 		} else {
 			voice = $config.audio.tts.voice ?? '';
+		}
+		if ($config.features?.enable_kokoro_preload) {
+			voice = $config.features.kokoro_default_voice ?? 'bf_emma';
+		} else if (TTSEngine === 'browser-kokoro') {
+			voice = resolveKokoroVoiceId(voice, $config.features?.kokoro_default_voice);
 		}
 
 		nonLocalVoices = $settings.audio?.tts?.nonLocalVoices ?? false;
@@ -117,6 +131,7 @@
 
 	const onTTSEngineChange = async () => {
 		if (TTSEngine === 'browser-kokoro') {
+			voice = resolveKokoroVoiceId(voice, $config.features?.kokoro_default_voice);
 			await loadKokoro();
 		}
 	};
@@ -128,21 +143,43 @@
 			if (TTSEngineConfig?.dtype) {
 				TTSModel = null;
 				TTSModelProgress = null;
+				TTSModelError = '';
 				TTSModelLoading = true;
 
 				const model_id = 'onnx-community/Kokoro-82M-v1.0-ONNX';
 
-				const { KokoroTTS } = await import('kokoro-js');
-				TTSModel = await KokoroTTS.from_pretrained(model_id, {
-					dtype: TTSEngineConfig.dtype, // Options: "fp32", "fp16", "q8", "q4", "q4f16"
-					device: !!navigator?.gpu ? 'webgpu' : 'wasm', // Detect WebGPU
-					progress_callback: (e) => {
-						TTSModelProgress = e;
-						console.log(e);
-					}
-				});
+				try {
+					const { KokoroTTS } = await import('kokoro-js');
+					const configuredDevice = $config.features?.kokoro_device ?? 'auto';
+					const device = configuredDevice === 'auto' ? await getKokoroDevice() : configuredDevice;
+					const options = {
+						dtype: TTSEngineConfig.dtype,
+						device,
+						progress_callback: (e) => {
+							TTSModelProgress = e;
+							console.log(e);
+						}
+					};
 
-				await getVoices();
+					try {
+						TTSModel = await KokoroTTS.from_pretrained(model_id, options);
+					} catch (error) {
+						if (device !== 'webgpu') throw error;
+						console.warn('Kokoro WebGPU initialization failed; retrying with WASM.', error);
+						TTSModel = await KokoroTTS.from_pretrained(model_id, {
+							...options,
+							device: 'wasm'
+						});
+					}
+
+					await getVoices();
+				} catch (error) {
+					console.error('Kokoro initialization failed:', error);
+					TTSModelError = error instanceof Error ? error.message : `${error}`;
+					toast.error(`Kokoro initialization failed: ${TTSModelError}`);
+				} finally {
+					TTSModelLoading = false;
+				}
 
 				// const rawAudio = await tts.generate(inputText, {
 				// 	// Use `tts.list_voices()` to list all available voices
@@ -326,7 +363,7 @@
 						</datalist>
 					</UserSettingField>
 				</UserSettingSection>
-			{:else}
+			{:else if TTSModelLoading}
 				<UserSettingSection title={$i18n.t('Voice')}>
 					<div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
 						<Spinner className="size-4" />
@@ -342,6 +379,15 @@
 					<div class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
 						{$i18n.t('Please do not close the settings page while loading the model.')}
 					</div>
+				</UserSettingSection>
+			{:else}
+				<UserSettingSection title={$i18n.t('Voice')}>
+					<div class="text-xs text-red-600 dark:text-red-400">
+						{$i18n.t('Kokoro.js failed to load')}{TTSModelError ? `: ${TTSModelError}` : ''}
+					</div>
+					<button type="button" class="text-xs underline" on:click={loadKokoro}>
+						{$i18n.t('Retry')}
+					</button>
 				</UserSettingSection>
 			{/if}
 		{:else if $config.audio.tts.engine === ''}

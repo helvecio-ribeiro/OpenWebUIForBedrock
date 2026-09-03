@@ -1,8 +1,8 @@
 # Open WebUI for AWS Bedrock
 
-This repository is a project-specific fork of [Open WebUI](https://github.com/open-webui/open-webui) with native AWS Bedrock model discovery and chat support.
+This repository is a project-specific fork of [Open WebUI](https://github.com/open-webui/open-webui) with native AWS Bedrock model discovery and chat support, plus a set of production-oriented Voice Mode improvements for local speech recognition and text-to-speech.
 
-The upstream project provides the core chat application, frontend, Ollama integration, OpenAI-compatible providers, workspace features, and general documentation. This fork adds a small Bedrock integration that discovers AWS foundation models and inference profiles, exposes them in the model selector, and invokes supported models through the Bedrock Converse APIs.
+The upstream project provides the core chat application, frontend, Ollama integration, OpenAI-compatible providers, workspace features, and general documentation. This fork adds Bedrock discovery and invocation through the Converse APIs. It also makes hands-free conversations more reliable by tightening microphone activation, making TTS playback deterministic, supporting centrally enforced TTS settings, and providing a low-latency local Kokoro deployment path.
 
 For upstream features, configuration, and general troubleshooting, see the [Open WebUI repository](https://github.com/open-webui/open-webui) and [Open WebUI documentation](https://docs.openwebui.com/).
 
@@ -122,6 +122,15 @@ We are incredibly grateful for the generous support of our sponsors. Their contr
 - Node.js 18.13 through 22.x
 - npm
 
+On Ubuntu, install the runtime tools used by local audio processing and the native Kokoro service:
+
+```bash
+sudo apt update
+sudo apt install -y ffmpeg espeak-ng git curl
+```
+
+`ffmpeg` supplies both `ffmpeg` and `ffprobe`. Without `ffprobe`, uploaded browser recordings may fail format detection before they reach Whisper. Microphone capture requires a secure browser context: use `localhost` during local development and HTTPS when accessing Open WebUI from another machine.
+
 ### Backend setup
 
 From the repository root:
@@ -224,6 +233,206 @@ The backend loads these values at startup and passes them explicitly to boto3. T
 ```
 
 The corresponding Bedrock models must also be enabled for the AWS account and region. Long-lived keys should not be committed to `.env`; use an IAM role or another secure credential provider for production.
+
+### Voice Mode improvements in this fork
+
+The upstream Voice Mode implementation has been adapted for long-running, hands-free local conversations:
+
+- Microphone input uses an adaptive ambient-noise floor and requires sustained speech-level energy before submitting audio. A short grace period after reopening the microphone prevents playback tails and keyboard transients from triggering a new turn.
+- A rolling pre-roll preserves the beginning of real speech while activation is being confirmed. The browser recording's original container header, MIME type, and filename extension are retained so WebM/Opus input is not incorrectly submitted as WAV.
+- Silence detection ends a confirmed utterance promptly, while hysteresis prevents normal variations in speaking volume from chopping it prematurely.
+- The microphone is restored after every model response, including TTS synthesis or playback failure, so a failed audio response cannot leave the call stuck waiting.
+- Synthesized sentences are produced and played through a promise-based FIFO pipeline. Each item is played once and awaited to completion rather than repeatedly polling and re-enqueuing cache entries.
+- Voice Mode playback is isolated from the normal message audio queue, preventing unrelated queue state from truncating or replacing the active response.
+- During TTS playback, the waiting dots are replaced with a five-bar waveform driven by the actual audio signal, with the tallest bars centered.
+
+For low-latency local speech recognition, the example environment uses Whisper `base`, English-only transcription, greedy decoding, and `int8` computation:
+
+```env
+WHISPER_MODEL=base
+WHISPER_COMPUTE_TYPE=int8
+WHISPER_LANGUAGE=en
+```
+
+Remove `WHISPER_LANGUAGE` when automatic language detection is required. These defaults favor conversational latency over maximum transcription accuracy; use a larger model if accuracy is more important than response time.
+
+### Preload browser Kokoro TTS
+
+Kokoro.js normally downloads and initializes when a user first selects it. To initialize it and warm the configured voice with a short synthesis in each authenticated browser as soon as the UI starts, set:
+
+```env
+ENABLE_KOKORO_PRELOAD=true
+KOKORO_PRELOAD_DTYPE=q8
+KOKORO_DEFAULT_VOICE=bf_emma
+KOKORO_DEVICE=wasm
+```
+
+Supported dtypes are `fp32`, `fp16`, `q8`, `q4`, and `q4f16`; invalid values fall back to `q8`. When preloading is enabled, browser bootstrap treats these environment settings as authoritative: it overwrites the user's runtime TTS engine, dtype, and voice with `browser-kokoro`, `KOKORO_PRELOAD_DTYPE`, and `KOKORO_DEFAULT_VOICE`. `bf_emma` is a British female voice. `KOKORO_DEVICE` accepts `auto`, `webgpu`, or `wasm`; use `wasm` on machines where Chrome reports no WebGPU adapter. The model runs and is cached in each browser, so this setting does not download it into the backend at server startup. In `auto` mode, WebGPU is used only when Chrome reports a usable adapter, with an automatic WASM fallback.
+
+### Local Kokoro TTS service
+
+For lower and more consistent latency, run Kokoro-FastAPI locally and use its OpenAI-compatible API. The included CPU service binds only to localhost:
+
+```bash
+docker compose -f docker-compose.kokoro.yaml up -d
+```
+
+Configure a host-run Open WebUI backend with:
+
+```env
+ENABLE_KOKORO_PRELOAD=false
+FORCE_AUDIO_TTS_CONFIG=true
+AUDIO_TTS_ENGINE=openai
+AUDIO_TTS_OPENAI_API_BASE_URL=http://127.0.0.1:8880/v1
+AUDIO_TTS_OPENAI_API_KEY=not-needed
+AUDIO_TTS_MODEL=kokoro
+AUDIO_TTS_VOICE=bf_emma
+AUDIO_TTS_OPENAI_PARAMS='{"response_format":"mp3","speed":1.0}'
+```
+
+`FORCE_AUDIO_TTS_CONFIG=true` makes these server-side settings authoritative over persisted administrator and user TTS selections. If Open WebUI also runs in Compose, attach both services to the same Compose network and use `http://kokoro-tts:8880/v1` instead. Set `KOKORO_FASTAPI_TAG` to a tested release tag rather than relying on `latest` for a stable deployment. The first service start downloads or initializes its model; wait for readiness before testing Voice Mode.
+
+#### Native Kokoro installation with `uv`
+
+Install `uv`, clone Kokoro-FastAPI into the location expected by the supplied service, synchronize its CPU dependencies, and download the model weights. Voice files are included in the Kokoro-FastAPI checkout:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+mkdir -p ~/.local/share
+git clone https://github.com/remsky/Kokoro-FastAPI.git ~/.local/share/kokoro-fastapi
+cd ~/.local/share/kokoro-fastapi
+uv sync --extra cpu
+uv run python docker/scripts/download_model.py --output api/src/models/v1_0
+```
+
+For a repeatable installation, check out a tested Kokoro-FastAPI release or commit before running `uv sync`; tracking its default branch can introduce unreviewed dependency or API changes. The service template assumes `uv` is installed at `~/.local/bin/uv`.
+
+Install and start the user service:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cd /path/to/OpenWebUIForBedrock
+cp scripts/systemd/kokoro-fastapi.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now kokoro-fastapi
+```
+
+User services normally stop when the user has no active login session. For a kiosk or unattended host that must start Kokoro at boot, enable lingering for the service account once:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+#### Verify Kokoro
+
+Check service status and recent logs:
+
+```bash
+systemctl --user status kokoro-fastapi
+journalctl --user -u kokoro-fastapi -n 100 --no-pager
+```
+
+Verify that `bf_emma` is installed and synthesize a playable sample:
+
+```bash
+curl -fsS http://127.0.0.1:8880/v1/audio/voices
+curl -fsS http://127.0.0.1:8880/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"kokoro","voice":"bf_emma","input":"Kokoro is ready.","response_format":"mp3","speed":1}' \
+  -o /tmp/kokoro-smoke-test.mp3
+ffplay -nodisp -autoexit /tmp/kokoro-smoke-test.mp3
+```
+
+The first synthesis can be slower because it loads and warms the model. Compare warm requests only when evaluating conversational latency.
+
+### Audio configuration precedence
+
+The fork applies audio settings in this order:
+
+| Priority | Condition | Effective behavior |
+| --- | --- | --- |
+| 1 | `FORCE_AUDIO_TTS_CONFIG=true` | The backend `AUDIO_TTS_*` values override administrator configuration, user settings, and model-specific voice selection. |
+| 2 | `ENABLE_KOKORO_PRELOAD=true` | The browser uses Kokoro.js with the configured dtype, device, and default voice. |
+| 3 | Neither enabled | Normal Open WebUI administrator, user, and model settings apply. |
+
+Do not enable browser preload when forcing the local API unless browser Kokoro is deliberately required as a separate option. Environment changes are read when the backend starts; restart the backend and hard-refresh authenticated browser sessions after changing them.
+
+### Voice Mode and kiosk operation
+
+Voice Mode works in a kiosk, but unattended browser startup has requirements outside the application:
+
+- This fork does not automatically authenticate a user or enter Voice Mode. The kiosk launcher or operator must still reach the call overlay before hands-free turn-taking begins.
+- Grant the site persistent microphone permission in the Chrome profile used by the kiosk.
+- Allow audio autoplay. Browsers may otherwise require one user gesture before the first response can play.
+- Serve remote kiosk clients over HTTPS; browser media APIs are unavailable on an insecure non-localhost origin.
+- Keep the same persistent Chrome profile between launches so permissions and the browser Kokoro cache survive restarts.
+- If the browser and backend use different origins, explicitly configure the kiosk origin in `CORS_ALLOW_ORIGIN`.
+- Prevent the operating system from suspending the kiosk or its audio devices during an active installation.
+
+Chrome enterprise policies are preferable to broad command-line flags for a managed unattended kiosk. At minimum, configure policies for microphone access and autoplay for only the deployed Open WebUI origin. A visible page does not guarantee audio permission: validate one complete speech-to-text, model, and text-to-speech turn after every browser or policy update.
+
+### Voice activation tuning
+
+The current Voice Mode behavior is implemented with these fixed values:
+
+| Setting | Value | Purpose |
+| --- | ---: | --- |
+| Listening grace period | 450 ms | Ignores playback tails and device noise immediately after reopening the microphone. |
+| Speech confirmation | 220 ms | Rejects short keyboard clicks and other transients. |
+| Silence timeout | 900 ms | Submits a confirmed utterance after speech stops. |
+| Minimum speech RMS | 0.018 | Establishes a floor below which input is not treated as speech. |
+| Noise multiplier | 2.8x | Requires speech to exceed the measured ambient-noise floor. |
+
+These values are currently source constants rather than environment settings. Quiet speakers or distant microphones may need a lower RMS floor; noisy rooms may need a higher threshold or multiplier. Test changes with both real speech and representative keyboard noise, and preserve the rolling pre-roll so speech confirmation does not remove the first word.
+
+### Audio troubleshooting
+
+| Symptom | Likely cause and action |
+| --- | --- |
+| `Invalid data found when processing input` | The recording is malformed or mislabeled. Confirm the current frontend is loaded; this fork preserves Chrome's WebM/Opus container header and uploads its real MIME type. |
+| `ffprobe: No such file or directory` | Install the Ubuntu `ffmpeg` package and restart the backend. |
+| Default system or US voice plays | Inspect the backend configuration response and confirm `FORCE_AUDIO_TTS_CONFIG`, `AUDIO_TTS_ENGINE=openai`, and `AUDIO_TTS_VOICE=bf_emma` were loaded at backend startup. |
+| Kokoro.js remains on “Loading” | Check browser network errors, storage quota, WebGPU support, and model-download access. Set `KOKORO_DEVICE=wasm` to bypass WebGPU probing. |
+| Voice Mode remains on waiting dots | Check the browser console and backend logs for a failed TTS request or stale frontend bundle, then hard-refresh. |
+| Speech playback ends early | Look for microphone interruption or overlapping playback. This fork serializes TTS through a per-message FIFO and waits for each audio element to finish. |
+| Keyboard noise starts a turn | Check microphone gain and placement. The adaptive detector rejects transients, but repeated or sustained mechanical noise can still resemble speech. |
+| No microphone input in a remote kiosk | Use HTTPS and confirm the kiosk profile has permission for the exact deployed origin. |
+
+### Performance and capacity notes
+
+- Whisper `base` with `int8` computation favors response time and modest CPU/RAM use over maximum accuracy.
+- Browser Kokoro has a substantial first-load download and initialization cost per browser profile but can use WebGPU when available.
+- Kokoro-FastAPI centralizes model loading and gives more predictable warm latency. Its first request after service startup remains a cold request.
+- One local CPU TTS worker can become a queue under concurrent use. Measure synthesis time under expected user concurrency before treating this setup as a shared service.
+- Voice Mode synthesizes sentence-sized chunks and begins FIFO playback as chunks become ready; total response duration is therefore different from time to first audio.
+
+Record cold-start time, warm synthesis time, transcription time, CPU load, and memory use on the deployment machine. Hardware-specific measurements are more useful than universal targets.
+
+### Production security
+
+The permissive values in `.env.example` are development defaults. For production, restrict them to known proxies and UI origins, for example:
+
+```env
+CORS_ALLOW_ORIGIN=https://assistant.example.com
+FORWARDED_ALLOW_IPS=127.0.0.1
+```
+
+Keep Kokoro bound to `127.0.0.1` unless it must be shared. If exposed beyond the host, place it behind an authenticated TLS reverse proxy; `AUDIO_TTS_OPENAI_API_KEY=not-needed` does not protect the local service. Do not commit AWS credentials or a populated `.env` file.
+
+### Maintaining this fork
+
+This fork currently reports Open WebUI `0.11.0` and modifies provider discovery, backend audio routing, application bootstrap, user audio settings, browser Kokoro workers, response playback, and Voice Mode. Those areas are the most likely merge-conflict points when incorporating upstream changes.
+
+Before releasing an upstream merge, verify at least:
+
+1. Bedrock discovery filters non-chat models and lists usable inference profiles.
+2. Bedrock Converse and ConverseStream both complete a chat turn.
+3. Keyboard noise does not submit a Voice Mode turn, while ordinary speech retains its first word.
+4. Whisper accepts the browser's actual recording format.
+5. Forced `bf_emma` synthesis reaches Kokoro-FastAPI and plays every sentence in order.
+6. The microphone reopens after successful playback and after a simulated TTS failure.
+7. The five-bar waveform appears only during actual TTS playback.
+8. `npm` production build and the relevant backend tests pass.
 
 ### Start the source application
 

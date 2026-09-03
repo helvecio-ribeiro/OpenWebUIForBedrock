@@ -105,7 +105,33 @@
 		}
 
 		if (userSettings?.ui) {
-			settings.set(userSettings.ui);
+			const uiSettings = userSettings.ui;
+			if ($config?.features?.force_audio_tts_config) {
+				uiSettings.audio = {
+					...uiSettings.audio,
+					tts: {
+						...uiSettings.audio?.tts,
+						engine: $config.features.forced_audio_tts_engine ?? '',
+						voice: $config.features.forced_audio_tts_voice ?? '',
+						defaultVoice: $config.features.forced_audio_tts_voice ?? ''
+					}
+				};
+			} else if ($config?.features?.enable_kokoro_preload) {
+				uiSettings.audio = {
+					...uiSettings.audio,
+					tts: {
+						...uiSettings.audio?.tts,
+						engine: 'browser-kokoro',
+						engineConfig: {
+							...uiSettings.audio?.tts?.engineConfig,
+							dtype: $config.features.kokoro_preload_dtype ?? 'q8'
+						},
+						voice: $config.features.kokoro_default_voice ?? 'bf_emma',
+						defaultVoice: $config.audio?.tts?.voice ?? ''
+					}
+				};
+			}
+			settings.set(uiSettings);
 		}
 		loadKeybindings(userSettings?.keybindings);
 

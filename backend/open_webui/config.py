@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 from concurrent.futures import ThreadPoolExecutor
@@ -1601,6 +1602,24 @@ AUDIO_TTS_MODEL = os.getenv('AUDIO_TTS_MODEL', 'tts-1')
 AUDIO_TTS_VOICE = os.getenv('AUDIO_TTS_VOICE', 'alloy')
 
 AUDIO_TTS_SPLIT_ON = os.getenv('AUDIO_TTS_SPLIT_ON', 'punctuation')
+
+# Treat the AUDIO_TTS_* environment variables as authoritative instead of only
+# using them as initial defaults for persistent configuration.
+FORCE_AUDIO_TTS_CONFIG = os.getenv('FORCE_AUDIO_TTS_CONFIG', 'False').lower() == 'true'
+
+ENABLE_KOKORO_PRELOAD = os.getenv('ENABLE_KOKORO_PRELOAD', 'False').lower() == 'true'
+KOKORO_PRELOAD_DTYPE = os.getenv('KOKORO_PRELOAD_DTYPE', 'q8').lower()
+if KOKORO_PRELOAD_DTYPE not in {'fp32', 'fp16', 'q8', 'q4', 'q4f16'}:
+    log.warning('Invalid KOKORO_PRELOAD_DTYPE; falling back to q8')
+    KOKORO_PRELOAD_DTYPE = 'q8'
+KOKORO_DEFAULT_VOICE = os.getenv('KOKORO_DEFAULT_VOICE', 'bf_emma').lower()
+if not re.fullmatch(r'[a-z][fm]_[a-z0-9_]+', KOKORO_DEFAULT_VOICE):
+    log.warning('Invalid KOKORO_DEFAULT_VOICE; falling back to bf_emma')
+    KOKORO_DEFAULT_VOICE = 'bf_emma'
+KOKORO_DEVICE = os.getenv('KOKORO_DEVICE', 'auto').lower()
+if KOKORO_DEVICE not in {'auto', 'webgpu', 'wasm'}:
+    log.warning('Invalid KOKORO_DEVICE; falling back to auto')
+    KOKORO_DEVICE = 'auto'
 
 AUDIO_TTS_AZURE_SPEECH_REGION = os.getenv('AUDIO_TTS_AZURE_SPEECH_REGION', '')
 

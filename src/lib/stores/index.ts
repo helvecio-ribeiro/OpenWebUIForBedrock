@@ -4,6 +4,7 @@ import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
 import type { AudioQueue } from '$lib/utils/audio';
+import type { KokoroWorker } from '$lib/workers/KokoroWorker';
 
 import emojiShortCodes from '$lib/emoji-shortcodes.json';
 
@@ -49,7 +50,7 @@ export const shortCodesToEmojis = writable(
 	}, {})
 );
 
-export const TTSWorker = writable(null);
+export const TTSWorker: Writable<KokoroWorker | null> = writable(null);
 
 export const chatId = writable('');
 export const chatTitle = writable('');
@@ -333,6 +334,10 @@ type Config = {
 		enable_direct_connections: boolean;
 		enable_version_update_check: boolean;
 		enable_pyodide_file_persistence?: boolean;
+		enable_kokoro_preload?: boolean;
+		kokoro_preload_dtype?: 'fp32' | 'fp16' | 'q8' | 'q4' | 'q4f16';
+		kokoro_default_voice?: string;
+		kokoro_device?: 'auto' | 'webgpu' | 'wasm';
 		folder_max_file_count?: number;
 	};
 	oauth: {

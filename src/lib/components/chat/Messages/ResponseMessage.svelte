@@ -14,15 +14,7 @@
 	import { getChatById } from '$lib/apis/chats';
 	import { generateTags } from '$lib/apis';
 
-	import {
-		audioQueue,
-		config,
-		models,
-		settings,
-		temporaryChatEnabled,
-		TTSWorker,
-		user
-	} from '$lib/stores';
+	import { audioQueue, config, models, settings, temporaryChatEnabled, user } from '$lib/stores';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
 	import { imageGenerations } from '$lib/apis/images';
 	import {
@@ -55,7 +47,7 @@
 	import Citations from './Citations.svelte';
 	import CodeExecutions from './CodeExecutions.svelte';
 	import ContentRenderer from './ContentRenderer.svelte';
-	import { KokoroWorker } from '$lib/workers/KokoroWorker';
+	import { getOrInitKokoroWorker, resolveKokoroVoiceId } from '$lib/utils/kokoro';
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import FollowUps from './ResponseMessage/FollowUps.svelte';
 	import { fade } from 'svelte/transition';
@@ -232,11 +224,31 @@
 	};
 
 	// Resolve voice: model-specific > user settings > config default
-	const getVoiceId = () =>
-		model?.info?.meta?.tts?.voice ??
-		($settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice
-			? ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
-			: $config?.audio?.tts?.voice);
+	const getTTSEngine = () =>
+		$config.features?.force_audio_tts_config
+			? ($config.features.forced_audio_tts_engine ?? '')
+			: $config.features?.enable_kokoro_preload
+			? 'browser-kokoro'
+			: ($settings.audio?.tts?.engine ?? $config.audio.tts.engine);
+
+	const getVoiceId = () => {
+		if ($config.features?.force_audio_tts_config) {
+			return $config.features.forced_audio_tts_voice ?? $config.audio.tts.voice;
+		}
+		if ($config.features?.enable_kokoro_preload) {
+			return $config.features.kokoro_default_voice ?? 'bf_emma';
+		}
+
+		const voiceId =
+			model?.info?.meta?.tts?.voice ??
+			($settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice
+				? ($settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice)
+				: $config?.audio?.tts?.voice);
+
+		return getTTSEngine() === 'browser-kokoro'
+			? resolveKokoroVoiceId(voiceId, $config.features?.kokoro_default_voice)
+			: voiceId;
+	};
 
 	const speak = async () => {
 		const content = visibleResponseContent;
@@ -251,7 +263,7 @@
 
 		speaking = true;
 
-		if ($config.audio.tts.engine === '') {
+		if (getTTSEngine() === '') {
 			let voices = [];
 			const getVoicesLoop = setInterval(() => {
 				voices = speechSynthesis.getVoices();
@@ -300,21 +312,17 @@
 			const voiceId = getVoiceId();
 			console.debug('Prepared message content for TTS', messageContentParts, 'voice:', voiceId);
 
-			if ($settings.audio?.tts?.engine === 'browser-kokoro') {
-				if (!$TTSWorker) {
-					await TTSWorker.set(
-						new KokoroWorker({
-							dtype: $settings.audio?.tts?.engineConfig?.dtype ?? 'fp32'
-						})
-					);
-
-					await $TTSWorker.init();
-				}
+			if (getTTSEngine() === 'browser-kokoro') {
+				const kokoroWorker = await getOrInitKokoroWorker(
+					$settings.audio?.tts?.engineConfig?.dtype ?? 'q8',
+					$config.features?.kokoro_device ?? 'auto',
+					voiceId
+				);
 
 				for (const [, sentence] of messageContentParts.entries()) {
 					if (signal.aborted) return;
 
-					const url = await $TTSWorker
+					const url = await kokoroWorker
 						.generate({ text: sentence, voice: voiceId })
 						.catch((error) => {
 							console.error(error);

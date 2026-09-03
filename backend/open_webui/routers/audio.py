@@ -35,8 +35,15 @@ from pydub.silence import split_on_silence
 from pydub.utils import mediainfo
 
 from open_webui.config import (
+    AUDIO_TTS_ENGINE,
+    AUDIO_TTS_MODEL,
+    AUDIO_TTS_OPENAI_API_BASE_URL,
+    AUDIO_TTS_OPENAI_API_KEY,
+    AUDIO_TTS_OPENAI_PARAMS,
+    AUDIO_TTS_VOICE,
     CACHE_DIR,
     ELEVENLABS_API_BASE_URL,
+    FORCE_AUDIO_TTS_CONFIG,
     WHISPER_COMPUTE_TYPE,
     WHISPER_LANGUAGE,
     WHISPER_MODEL_AUTO_UPDATE,
@@ -359,12 +366,33 @@ async def _write_tts_cache(
 
 async def _tts_openai(request, payload, file_path, file_body_path, user):
     """Generate speech via an OpenAI-compatible TTS endpoint."""
-    payload['model'] = await Config.get('audio.tts.model')
+    payload['model'] = (
+        AUDIO_TTS_MODEL
+        if FORCE_AUDIO_TTS_CONFIG
+        else await Config.get('audio.tts.model')
+    )
     if not payload.get('voice'):
-        payload['voice'] = await Config.get('audio.tts.voice')
-    payload = {**payload, **(await Config.get('audio.tts.openai.params') or {})}
-    api_key = await Config.get('audio.tts.openai.api_key')
-    api_base_url = await Config.get('audio.tts.openai.api_base_url')
+        payload['voice'] = (
+            AUDIO_TTS_VOICE
+            if FORCE_AUDIO_TTS_CONFIG
+            else await Config.get('audio.tts.voice')
+        )
+    params = (
+        AUDIO_TTS_OPENAI_PARAMS
+        if FORCE_AUDIO_TTS_CONFIG
+        else await Config.get('audio.tts.openai.params')
+    )
+    payload = {**payload, **(params or {})}
+    api_key = (
+        AUDIO_TTS_OPENAI_API_KEY
+        if FORCE_AUDIO_TTS_CONFIG
+        else await Config.get('audio.tts.openai.api_key')
+    )
+    api_base_url = (
+        AUDIO_TTS_OPENAI_API_BASE_URL
+        if FORCE_AUDIO_TTS_CONFIG
+        else await Config.get('audio.tts.openai.api_base_url')
+    )
 
     headers = {
         'Content-Type': 'application/json',
@@ -555,7 +583,11 @@ _TTS_ENGINES = {
 
 @router.post('/speech')
 async def speech(request: Request, user=Depends(get_verified_user)):
-    engine = await Config.get('audio.tts.engine')
+    engine = (
+        AUDIO_TTS_ENGINE
+        if FORCE_AUDIO_TTS_CONFIG
+        else await Config.get('audio.tts.engine')
+    )
     if engine == '':
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -570,7 +602,13 @@ async def speech(request: Request, user=Depends(get_verified_user)):
 
     body = await request.body()
     name = hashlib.sha256(
-        body + str(engine).encode('utf-8') + str(await Config.get('audio.tts.model')).encode('utf-8')
+        body
+        + str(engine).encode('utf-8')
+        + str(
+            AUDIO_TTS_MODEL
+            if FORCE_AUDIO_TTS_CONFIG
+            else await Config.get('audio.tts.model')
+        ).encode('utf-8')
     ).hexdigest()
 
     file_path = SPEECH_CACHE_DIR.joinpath(f'{name}.mp3')
@@ -624,7 +662,7 @@ async def _transcribe_whisper(request, file_path, languages, file_dir, id):
     def _run():
         segments, info = model.transcribe(
             file_path,
-            beam_size=5,
+            beam_size=1,
             vad_filter=WHISPER_VAD_FILTER,
             language=languages[0],
             multilingual=WHISPER_MULTILINGUAL,

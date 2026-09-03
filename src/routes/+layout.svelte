@@ -71,6 +71,7 @@
 		removeAllDetails
 	} from '$lib/utils';
 	import { setTextScale } from '$lib/utils/text-scale';
+	import { getOrInitKokoroWorker, resolveKokoroVoiceId } from '$lib/utils/kokoro';
 
 	import NotificationToast from '$lib/components/NotificationToast.svelte';
 	import AppSidebar from '$lib/components/app/AppSidebar.svelte';
@@ -1199,6 +1200,16 @@
 							await config.set(await getBackendConfig());
 						} catch (error) {
 							console.error('Error refreshing backend config:', error);
+						}
+
+						if ($config?.features?.enable_kokoro_preload) {
+							void getOrInitKokoroWorker(
+								$config.features.kokoro_preload_dtype ?? 'q8',
+								$config.features.kokoro_device ?? 'auto',
+								resolveKokoroVoiceId($config.features.kokoro_default_voice)
+							).catch((error) => {
+								console.error('Kokoro preload failed:', error);
+							});
 						}
 
 						// Keep user timezone in sync on every app load/refresh

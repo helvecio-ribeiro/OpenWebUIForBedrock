@@ -7,11 +7,13 @@
 	import { blobToFile } from '$lib/utils';
 	import { generateEmoji } from '$lib/apis';
 	import { synthesizeOpenAISpeech, transcribeAudio } from '$lib/apis/audio';
+	import { getOrInitKokoroWorker, resolveKokoroVoiceId } from '$lib/utils/kokoro';
 
 	import { toast } from 'svelte-sonner';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import VideoInputMenu from './CallOverlay/VideoInputMenu.svelte';
+	import AudioWaveform from './CallOverlay/AudioWaveform.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -32,6 +34,8 @@
 	let confirmed = false;
 	let interrupted = false;
 	let assistantSpeaking = false;
+	let ttsPlaying = false;
+	let playbackLevels = Array(5).fill(0.1);
 	let muted = false;
 
 	let emoji = null;
@@ -44,6 +48,10 @@
 	let mediaRecorder;
 	let audioStream = null;
 	let audioChunks = [];
+	let audioPreRollChunks = [];
+	let audioContainerHeader: Blob | null = null;
+	let microphoneAudioContext: AudioContext | null = null;
+	let microphoneAnimationFrame: number | null = null;
 
 	let videoInputDevices = [];
 	let selectedVideoInputDeviceId = null;
@@ -153,8 +161,13 @@
 
 	const MIN_DECIBELS = -55;
 	const VISUALIZER_BUFFER_LENGTH = 300;
+	const SILENCE_TIMEOUT_MS = 900;
+	const LISTENING_GRACE_MS = 450;
+	const SPEECH_CONFIRMATION_MS = 220;
+	const MIN_SPEECH_RMS = 0.018;
+	const NOISE_FLOOR_MULTIPLIER = 2.8;
 
-	const transcribeHandler = async (audioBlob) => {
+	const transcribeHandler = async (audioBlob, extension = 'webm') => {
 		// Create a blob from the audio chunks
 		if (!audioBlob || audioBlob.size < 100) {
 			console.log('Audio blob too small or empty, skipping transcription');
@@ -162,7 +175,7 @@
 		}
 
 		await tick();
-		const file = blobToFile(audioBlob, 'recording.wav');
+		const file = blobToFile(audioBlob, `recording.${extension}`);
 
 		const res = await transcribeAudio(
 			localStorage.token,
@@ -191,6 +204,8 @@
 			const _audioChunks = audioChunks.slice(0);
 
 			audioChunks = [];
+			audioPreRollChunks = [];
+			audioContainerHeader = null;
 			mediaRecorder = false;
 
 			if (_continue) {
@@ -212,11 +227,15 @@
 					];
 				}
 
-				const audioBlob = new Blob(_audioChunks, { type: 'audio/wav' });
-				await transcribeHandler(audioBlob);
-
-				confirmed = false;
-				loading = false;
+				const type = _audioChunks[0]?.type || 'audio/webm';
+				const extension = type.split('/')[1]?.split(';')[0] || 'webm';
+				const audioBlob = new Blob(_audioChunks, { type });
+				try {
+					await transcribeHandler(audioBlob, extension);
+				} finally {
+					confirmed = false;
+					loading = false;
+				}
 			}
 		} else {
 			audioChunks = [];
@@ -228,6 +247,13 @@
 			}
 			audioStream = null;
 		}
+	};
+
+	const stopAudioAnalysis = () => {
+		if (microphoneAnimationFrame !== null) cancelAnimationFrame(microphoneAnimationFrame);
+		microphoneAnimationFrame = null;
+		if (microphoneAudioContext) void microphoneAudioContext.close();
+		microphoneAudioContext = null;
 	};
 
 	const startRecording = async () => {
@@ -251,11 +277,21 @@
 			mediaRecorder.onstart = () => {
 				console.log('Recording started');
 				audioChunks = [];
+				audioPreRollChunks = [];
+				audioContainerHeader = null;
 			};
 
 			mediaRecorder.ondataavailable = (event) => {
+				if (!event.data.size) return;
+				if (!audioContainerHeader) {
+					audioContainerHeader = event.data;
+					return;
+				}
 				if (hasStartedSpeaking) {
 					audioChunks.push(event.data);
+				} else {
+					audioPreRollChunks.push(event.data);
+					if (audioPreRollChunks.length > 5) audioPreRollChunks.shift();
 				}
 			};
 
@@ -264,11 +300,27 @@
 				stopRecordingCallback();
 			};
 
+			stopAudioAnalysis();
 			analyseAudio(audioStream);
 		}
 	};
 
+	const restoreListeningState = async (): Promise<void> => {
+		assistantSpeaking = false;
+		loading = false;
+		confirmed = false;
+		hasStartedSpeaking = false;
+		emoji = null;
+
+		if ($showCallOverlay && (!mediaRecorder || mediaRecorder.state === 'inactive')) {
+			await startRecording().catch((error) => {
+				console.error('Failed to restore voice input:', error);
+			});
+		}
+	};
+
 	const stopAudioStream = async () => {
+		stopAudioAnalysis();
 		try {
 			if (mediaRecorder) {
 				mediaRecorder.stop();
@@ -297,22 +349,24 @@
 	};
 
 	const analyseAudio = (stream) => {
-		const audioContext = new AudioContext();
+		microphoneAudioContext = new AudioContext();
+		const audioContext = microphoneAudioContext;
 		const audioStreamSource = audioContext.createMediaStreamSource(stream);
 
 		const analyser = audioContext.createAnalyser();
 		analyser.minDecibels = MIN_DECIBELS;
 		audioStreamSource.connect(analyser);
 
-		const bufferLength = analyser.frequencyBinCount;
-
-		const domainData = new Uint8Array(bufferLength);
 		const timeDomainData = new Uint8Array(analyser.fftSize);
+		if (mediaRecorder && mediaRecorder.state === 'inactive') mediaRecorder.start(100);
 
-		let lastSoundTime = Date.now();
+		const listeningStartedAt = performance.now();
+		let lastSpeechTime = listeningStartedAt;
+		let candidateStartedAt: number | null = null;
+		let noiseFloor = 0.004;
 		hasStartedSpeaking = false;
 
-		console.log('🔊 Sound detection started', lastSoundTime, hasStartedSpeaking);
+		console.log('🔊 Speech detection started', Math.round(listeningStartedAt));
 
 		const detectSound = () => {
 			const processFrame = () => {
@@ -330,8 +384,6 @@
 				}
 
 				analyser.getByteTimeDomainData(timeDomainData);
-				analyser.getByteFrequencyData(domainData);
-
 				// Calculate RMS level from time domain data
 				rmsLevel = calculateRMS(timeDomainData);
 
@@ -339,26 +391,39 @@
 					rmsLevel = 0;
 				}
 
-				// Check if initial speech/noise has started
-				const hasSound = domainData.some((value) => value > 0);
-				if (hasSound) {
-					// BIG RED TEXT
-					console.log('%c%s', 'color: red; font-size: 20px;', '🔊 Sound detected');
-					if (mediaRecorder && mediaRecorder.state !== 'recording') {
-						mediaRecorder.start();
-					}
-
-					if (!hasStartedSpeaking) {
-						hasStartedSpeaking = true;
-						stopAllAudio();
-					}
-
-					lastSoundTime = Date.now();
+				const now = performance.now();
+				if (now - listeningStartedAt < LISTENING_GRACE_MS) {
+					noiseFloor = noiseFloor * 0.9 + rmsLevel * 0.1;
+					microphoneAnimationFrame = requestAnimationFrame(processFrame);
+					return;
 				}
 
-				// Start silence detection only after initial speech/noise has been detected
-				if (hasStartedSpeaking) {
-					if (Date.now() - lastSoundTime > 2000) {
+				const speechThreshold = Math.max(MIN_SPEECH_RMS, noiseFloor * NOISE_FLOOR_MULTIPLIER);
+				const speechLike = rmsLevel >= speechThreshold;
+				const continuingSpeech = rmsLevel >= speechThreshold * 0.55;
+
+				if (!hasStartedSpeaking) {
+					if (speechLike) {
+						candidateStartedAt ??= now;
+						if (now - candidateStartedAt >= SPEECH_CONFIRMATION_MS) {
+							hasStartedSpeaking = true;
+							audioChunks = audioContainerHeader
+								? [audioContainerHeader, ...audioPreRollChunks]
+								: [...audioPreRollChunks];
+							audioPreRollChunks = [];
+							lastSpeechTime = now;
+							console.log(
+								`🗣️ Speech confirmed (RMS ${rmsLevel.toFixed(3)}, threshold ${speechThreshold.toFixed(3)})`
+							);
+							stopAllAudio();
+						}
+					} else {
+						candidateStartedAt = null;
+						noiseFloor = noiseFloor * 0.98 + rmsLevel * 0.02;
+					}
+				} else {
+					if (continuingSpeech) lastSpeechTime = now;
+					if (now - lastSpeechTime > SILENCE_TIMEOUT_MS) {
 						confirmed = true;
 
 						if (mediaRecorder) {
@@ -369,41 +434,126 @@
 					}
 				}
 
-				window.requestAnimationFrame(processFrame);
+				microphoneAnimationFrame = window.requestAnimationFrame(processFrame);
 			};
 
-			window.requestAnimationFrame(processFrame);
+			microphoneAnimationFrame = window.requestAnimationFrame(processFrame);
 		};
 
 		detectSound();
 	};
 
-	let finishedMessages = {};
 	let currentMessageId = null;
 	let currentUtterance = null;
+	let currentAudio: HTMLAudioElement | null = null;
+	let playbackAudioContext: AudioContext | null = null;
+	let playbackSource: MediaElementAudioSourceNode | null = null;
+	let playbackAnalyser: AnalyserNode | null = null;
+	let playbackAnimationFrame: number | null = null;
+
+	const stopPlaybackVisualization = () => {
+		if (playbackAnimationFrame !== null) cancelAnimationFrame(playbackAnimationFrame);
+		playbackAnimationFrame = null;
+		playbackSource?.disconnect();
+		playbackSource = null;
+		playbackAnalyser = null;
+		playbackLevels = Array(5).fill(0.1);
+		ttsPlaying = false;
+	};
+
+	const startPlaybackVisualization = async (audio: HTMLAudioElement) => {
+		stopPlaybackVisualization();
+		ttsPlaying = true;
+
+		try {
+			playbackAudioContext ??= new AudioContext();
+			await playbackAudioContext.resume();
+			playbackAnalyser = playbackAudioContext.createAnalyser();
+			playbackAnalyser.fftSize = 128;
+			playbackAnalyser.smoothingTimeConstant = 0.72;
+			playbackSource = playbackAudioContext.createMediaElementSource(audio);
+			playbackSource.connect(playbackAnalyser);
+			playbackAnalyser.connect(playbackAudioContext.destination);
+
+			const frequencyData = new Uint8Array(playbackAnalyser.frequencyBinCount);
+			const updateWaveform = () => {
+				if (!ttsPlaying || !playbackAnalyser) return;
+				playbackAnalyser.getByteFrequencyData(frequencyData);
+				const binsPerBar = Math.max(1, Math.floor(frequencyData.length / playbackLevels.length));
+				playbackLevels = playbackLevels.map((_, index) => {
+					const start = index * binsPerBar;
+					const end = Math.min(frequencyData.length, start + binsPerBar);
+					let total = 0;
+					for (let i = start; i < end; i++) total += frequencyData[i];
+					return Math.max(0.1, total / Math.max(1, end - start) / 255);
+				});
+				playbackAnimationFrame = requestAnimationFrame(updateWaveform);
+			};
+			updateWaveform();
+		} catch (error) {
+			console.warn('Unable to visualize TTS playback:', error);
+		}
+	};
+	const getTTSEngine = () =>
+		$config.features?.force_audio_tts_config
+			? ($config.features.forced_audio_tts_engine ?? '')
+			: $config.features?.enable_kokoro_preload
+				? 'browser-kokoro'
+				: ($settings.audio?.tts?.engine ?? $config.audio.tts.engine);
 
 	// Get voice: model-specific > user settings > config default
 	const getVoiceId = () => {
+		if ($config.features?.force_audio_tts_config) {
+			return $config.features.forced_audio_tts_voice ?? $config.audio.tts.voice;
+		}
+		if ($config.features?.enable_kokoro_preload) {
+			return $config.features.kokoro_default_voice ?? 'bf_emma';
+		}
+
+		let voiceId;
 		// Check for model-specific TTS voice first
 		if (model?.info?.meta?.tts?.voice) {
-			return model.info.meta.tts.voice;
+			voiceId = model.info.meta.tts.voice;
+		} else if ($settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice) {
+			voiceId = $settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice;
+		} else {
+			voiceId = $config?.audio?.tts?.voice;
 		}
-		// Fall back to user settings or config default
-		if ($settings?.audio?.tts?.defaultVoice === $config.audio.tts.voice) {
-			return $settings?.audio?.tts?.voice ?? $config?.audio?.tts?.voice;
-		}
-		return $config?.audio?.tts?.voice;
+
+		return getTTSEngine() === 'browser-kokoro'
+			? resolveKokoroVoiceId(voiceId, $config.features?.kokoro_default_voice)
+			: voiceId;
 	};
 
-	const speakSpeechSynthesisHandler = (content) => {
+	const speakSpeechSynthesisHandler = (content: string, signal: AbortSignal): Promise<boolean> => {
 		if ($showCallOverlay) {
-			return new Promise((resolve) => {
+			return new Promise<boolean>((resolve) => {
 				let voices = [];
-				const getVoicesLoop = setInterval(async () => {
+				let settled = false;
+				let speechTimeout: ReturnType<typeof setTimeout> | null = null;
+				let getVoicesLoop: ReturnType<typeof setInterval>;
+				const startedAt = Date.now();
+				const finish = (result: boolean) => {
+					if (settled) return;
+					settled = true;
+					clearInterval(getVoicesLoop);
+					if (speechTimeout) clearTimeout(speechTimeout);
+					signal.removeEventListener('abort', handleAbort);
+					resolve(result);
+				};
+				const handleAbort = () => {
+					speechSynthesis.cancel();
+					finish(false);
+				};
+				signal.addEventListener('abort', handleAbort, { once: true });
+				if (signal.aborted) {
+					handleAbort();
+					return;
+				}
+				getVoicesLoop = setInterval(async () => {
 					voices = await speechSynthesis.getVoices();
 					if (voices.length > 0) {
 						clearInterval(getVoicesLoop);
-
 						const voiceId = getVoiceId();
 						const voice = voices?.filter((v) => v.voiceURI === voiceId)?.at(0) ?? undefined;
 
@@ -414,26 +564,63 @@
 							currentUtterance.voice = voice;
 						}
 
-						speechSynthesis.speak(currentUtterance);
 						currentUtterance.onend = async (e) => {
 							await new Promise((r) => setTimeout(r, 200));
-							resolve(e);
+							finish(true);
 						};
+						currentUtterance.onerror = (event) => {
+							console.error('Browser speech synthesis failed:', event);
+							finish(false);
+						};
+						speechTimeout = setTimeout(
+							() => {
+								console.error('Browser speech synthesis timed out');
+								speechSynthesis.cancel();
+								finish(false);
+							},
+							Math.max(30_000, content.length * 250)
+						);
+						speechSynthesis.speak(currentUtterance);
+					} else if (Date.now() - startedAt >= 5000) {
+						console.error('Browser speech synthesis has no available voices');
+						finish(false);
 					}
 				}, 100);
 			});
 		} else {
-			return Promise.resolve();
+			return Promise.resolve(false);
 		}
 	};
 
-	const playAudio = (audio) => {
+	const playAudio = (audio, signal: AbortSignal): Promise<boolean> => {
 		if ($showCallOverlay) {
-			return new Promise((resolve) => {
-				const audioElement = document.getElementById('audioElement') as HTMLAudioElement;
+			return new Promise<boolean>((resolve) => {
+				const audioElement = audio instanceof HTMLAudioElement ? audio : null;
+				let settled = false;
+				const finish = (result: boolean) => {
+					if (settled) return;
+					settled = true;
+					signal.removeEventListener('abort', handleAbort);
+					if (currentAudio === audioElement) currentAudio = null;
+					stopPlaybackVisualization();
+					resolve(result);
+				};
+				const handleAbort = () => {
+					if (audioElement) {
+						audioElement.pause();
+						audioElement.currentTime = 0;
+					}
+					finish(false);
+				};
+				signal.addEventListener('abort', handleAbort, { once: true });
+				if (signal.aborted) {
+					handleAbort();
+					return;
+				}
 
-				if (audioElement) {
-					audioElement.src = audio.src;
+				if (audioElement && audio?.src) {
+					currentAudio = audioElement;
+					void startPlaybackVisualization(audioElement);
 					audioElement.muted = true;
 					audioElement.playbackRate = $settings.audio?.tts?.playbackRate ?? 1;
 
@@ -444,16 +631,23 @@
 						})
 						.catch((error) => {
 							console.error(error);
+							finish(false);
 						});
 
 					audioElement.onended = async (e) => {
 						await new Promise((r) => setTimeout(r, 100));
-						resolve(e);
+						finish(true);
 					};
+					audioElement.onerror = (event) => {
+						console.error('Audio playback failed:', event);
+						finish(false);
+					};
+				} else {
+					finish(false);
 				}
 			});
 		} else {
-			return Promise.resolve();
+			return Promise.resolve(false);
 		}
 	};
 
@@ -464,127 +658,130 @@
 		if (chatStreaming) {
 			stopResponse();
 		}
+		audioAbortController?.abort();
 
 		if (currentUtterance) {
 			speechSynthesis.cancel();
 			currentUtterance = null;
 		}
 
-		const audioElement = document.getElementById('audioElement');
-		if (audioElement) {
-			audioElement.muted = true;
-			audioElement.pause();
-			audioElement.currentTime = 0;
+		if (currentAudio) {
+			currentAudio.muted = true;
+			currentAudio.pause();
+			currentAudio.currentTime = 0;
+			currentAudio = null;
 		}
+		stopPlaybackVisualization();
 	};
 
 	let audioAbortController = new AbortController();
 
-	// Audio cache map where key is the content and value is the Audio object.
-	const audioCache = new Map();
-	const emojiCache = new Map();
+	type SynthesizedAudio = {
+		audio: HTMLAudioElement | true | null;
+		emoji: Promise<string | null>;
+		readyAt: number;
+	};
+	let ttsSequence = 0;
+	const elapsed = (start: number, end = performance.now()) => `${Math.round(end - start)}ms`;
 
-	const fetchAudio = async (content) => {
-		if (!audioCache.has(content)) {
-			try {
-				// Set the emoji for the content if needed
-				if ($settings?.showEmojiInCall ?? false) {
-					const emoji = await generateEmoji(localStorage.token, modelId, content, chatId);
-					if (emoji) {
-						emojiCache.set(content, emoji);
-					}
-				}
-
-				if ($settings.audio?.tts?.engine === 'browser-kokoro') {
-					const url = await $TTSWorker
-						.generate({
-							text: content,
-							voice: getVoiceId()
-						})
-						.catch((error) => {
-							console.error(error);
-							toast.error(`${error}`);
-						});
-
-					if (url) {
-						audioCache.set(content, new Audio(url));
-					}
-				} else if ($config.audio.tts.engine !== '') {
-					const res = await synthesizeOpenAISpeech(localStorage.token, getVoiceId(), content).catch(
-						(error) => {
-							console.error(error);
+	const fetchAudio = async (
+		content: string,
+		traceId: string,
+		receivedAt: number
+	): Promise<SynthesizedAudio> => {
+		console.info(`[Voice TTS ${traceId}] synthesis requested (+${elapsed(receivedAt)})`);
+		try {
+			const emojiPromise =
+				($settings?.showEmojiInCall ?? false)
+					? generateEmoji(localStorage.token, modelId, content, chatId).catch((error) => {
+							console.error('Failed to generate call emoji:', error);
 							return null;
-						}
-					);
+						})
+					: Promise.resolve(null);
 
-					if (res) {
-						const blob = await res.blob();
-						const blobUrl = URL.createObjectURL(blob);
-						audioCache.set(content, new Audio(blobUrl));
+			if (getTTSEngine() === 'browser-kokoro') {
+				const kokoroWorker = await getOrInitKokoroWorker(
+					$settings.audio?.tts?.engineConfig?.dtype ??
+						$config.features?.kokoro_preload_dtype ??
+						'q8',
+					$config.features?.kokoro_device ?? 'auto',
+					getVoiceId()
+				);
+				const url = await kokoroWorker
+					.generate({
+						text: content,
+						voice: getVoiceId()
+					})
+					.catch((error) => {
+						console.error(error);
+						toast.error(`${error}`);
+					});
+
+				const readyAt = performance.now();
+				console.info(`[Voice TTS ${traceId}] synthesis ready (+${elapsed(receivedAt, readyAt)})`);
+				return { audio: url ? new Audio(url) : null, emoji: emojiPromise, readyAt };
+			} else if (getTTSEngine() !== '') {
+				const res = await synthesizeOpenAISpeech(localStorage.token, getVoiceId(), content).catch(
+					(error) => {
+						console.error(error);
+						return null;
 					}
-				} else {
-					audioCache.set(content, true);
-				}
-			} catch (error) {
-				console.error('Error synthesizing speech:', error);
-			}
-		}
+				);
 
-		return audioCache.get(content);
+				if (!res) return { audio: null, emoji: emojiPromise, readyAt: performance.now() };
+				const blob = await res.blob();
+				const readyAt = performance.now();
+				console.info(`[Voice TTS ${traceId}] synthesis ready (+${elapsed(receivedAt, readyAt)})`);
+				return {
+					audio: new Audio(URL.createObjectURL(blob)),
+					emoji: emojiPromise,
+					readyAt
+				};
+			} else {
+				return { audio: true, emoji: emojiPromise, readyAt: performance.now() };
+			}
+		} catch (error) {
+			console.error('Error synthesizing speech:', error);
+			return { audio: null, emoji: Promise.resolve(null), readyAt: performance.now() };
+		}
 	};
 
-	let messages = {};
+	let playbackQueues: Record<string, Promise<boolean>> = {};
 
-	const monitorAndPlayAudio = async (id, signal) => {
-		while (!signal.aborted) {
-			if (messages[id] && messages[id].length > 0) {
-				// Retrieve the next content string from the queue
-				const content = messages[id].shift(); // Dequeues the content for playing
+	const enqueueAudio = (id: string, content: string, signal: AbortSignal) => {
+		const receivedAt = performance.now();
+		const traceId = `${id.slice(0, 8)}-${++ttsSequence}`;
+		console.info(`[Voice TTS ${traceId}] sentence received (${content.length} characters)`);
+		const audioPromise = fetchAudio(content, traceId, receivedAt);
+		const previous = playbackQueues[id] ?? Promise.resolve(true);
+		playbackQueues[id] = previous.then(async (shouldContinue) => {
+			if (!shouldContinue || signal.aborted) return false;
 
-				if (audioCache.has(content)) {
-					// If content is available in the cache, play it
+			const item = await audioPromise;
+			if (signal.aborted || item.audio === null) return false;
+			void item.emoji.then((generatedEmoji) => {
+				if (!signal.aborted) emoji = generatedEmoji;
+			});
 
-					// Set the emoji for the content if available
-					if (($settings?.showEmojiInCall ?? false) && emojiCache.has(content)) {
-						emoji = emojiCache.get(content);
-					} else {
-						emoji = null;
-					}
+			const playbackStartedAt = performance.now();
+			console.info(
+				`[Voice TTS ${traceId}] playback started (+${elapsed(receivedAt, playbackStartedAt)}, ready-to-play ${elapsed(item.readyAt, playbackStartedAt)})`
+			);
 
-					if ($config.audio.tts.engine !== '') {
-						try {
-							console.log(
-								'%c%s',
-								'color: red; font-size: 20px;',
-								`Playing audio for content: ${content}`
-							);
-
-							const audio = audioCache.get(content);
-							await playAudio(audio); // Here ensure that playAudio is indeed correct method to execute
-							console.log(`Played audio for content: ${content}`);
-							await new Promise((resolve) => setTimeout(resolve, 200)); // Wait before retrying to reduce tight loop
-						} catch (error) {
-							console.error('Error playing audio:', error);
-						}
-					} else {
-						await speakSpeechSynthesisHandler(content);
-					}
-				} else {
-					// If not available in the cache, push it back to the queue and delay
-					messages[id].unshift(content); // Re-queue the content at the start
-					console.log(`Audio for "${content}" not yet available in the cache, re-queued...`);
-					await new Promise((resolve) => setTimeout(resolve, 200)); // Wait before retrying to reduce tight loop
-				}
-			} else if (finishedMessages[id] && messages[id] && messages[id].length === 0) {
-				// If the message is finished and there are no more messages to process, break the loop
-				assistantSpeaking = false;
-				break;
-			} else {
-				// No messages to process, sleep for a bit
-				await new Promise((resolve) => setTimeout(resolve, 200));
+			if (getTTSEngine() === '') {
+				const played = await speakSpeechSynthesisHandler(content, signal);
+				console.info(
+					`[Voice TTS ${traceId}] playback ${played ? 'ended' : 'stopped'} (${elapsed(playbackStartedAt)})`
+				);
+				return played;
 			}
-		}
-		console.log(`Audio monitoring and playing stopped for message ID ${id}`);
+
+			const played = await playAudio(item.audio, signal);
+			console.info(
+				`[Voice TTS ${traceId}] playback ${played ? 'ended' : 'stopped'} (${elapsed(playbackStartedAt)})`
+			);
+			return played;
+		});
 	};
 
 	const chatStartHandler = async (e) => {
@@ -602,8 +799,7 @@
 			audioAbortController = new AbortController();
 
 			assistantSpeaking = true;
-			// Start monitoring and playing audio for the message ID
-			monitorAndPlayAudio(id, audioAbortController.signal);
+			playbackQueues[id] = Promise.resolve(true);
 		}
 	};
 
@@ -618,15 +814,8 @@
 			console.log(`Received chat event for message ID ${id}: ${content}`);
 
 			try {
-				if (messages[id] === undefined) {
-					messages[id] = [content];
-				} else {
-					messages[id].push(content);
-				}
-
 				console.log(content);
-
-				fetchAudio(content);
+				enqueueAudio(id, content, audioAbortController.signal);
 			} catch (error) {
 				console.error('Failed to fetch or play audio:', error);
 			}
@@ -634,11 +823,14 @@
 	};
 
 	const chatFinishHandler = async (e) => {
-		const { id, content } = e.detail;
-		// "content" here is the entire message from the assistant
-		finishedMessages[id] = true;
-
+		const { id } = e.detail;
 		chatStreaming = false;
+		const completed = await (playbackQueues[id] ?? Promise.resolve(true));
+		delete playbackQueues[id];
+		if (currentMessageId === id && !audioAbortController.signal.aborted) {
+			if (!completed) console.error(`TTS playback failed for message ID ${id}`);
+			await restoreListeningState();
+		}
 	};
 
 	const toggleMute = () => {
@@ -748,6 +940,8 @@
 		await stopCamera();
 
 		await stopAudioStream();
+		await playbackAudioContext?.close();
+		playbackAudioContext = null;
 		eventTarget.removeEventListener('chat:start', chatStartHandler);
 		eventTarget.removeEventListener('chat', chatEventHandler);
 		eventTarget.removeEventListener('chat:finish', chatFinishHandler);
@@ -787,6 +981,8 @@
 					>
 						{emoji}
 					</div>
+				{:else if ttsPlaying}
+					<AudioWaveform levels={playbackLevels} compact />
 				{:else if loading || assistantSpeaking}
 					<svg
 						class="size-12 text-gray-900 dark:text-gray-400"
@@ -863,6 +1059,8 @@
 						>
 							{emoji}
 						</div>
+					{:else if ttsPlaying}
+						<AudioWaveform levels={playbackLevels} />
 					{:else if loading || assistantSpeaking}
 						<svg
 							class="size-44 text-gray-900 dark:text-gray-400"
