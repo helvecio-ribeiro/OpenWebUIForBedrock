@@ -479,39 +479,6 @@ class ChatTable:
             )
             return list(result.scalars().all())
 
-    async def get_internal_chat_by_note_id(
-        self, note_id: str, user_id: str, db: AsyncSession | None = None
-    ) -> ChatModel | None:
-        async with get_async_db_context(db) as session:
-            result = await session.execute(
-                select(Chat)
-                .where(
-                    Chat.user_id == user_id,
-                    Chat.meta['internal'].as_boolean().is_(True),
-                    Chat.meta['type'].as_string() == 'note',
-                    Chat.meta['note_id'].as_string() == note_id,
-                )
-                .order_by(Chat.updated_at.desc(), Chat.created_at.desc())
-            )
-            chat = result.scalars().first()
-            return ChatModel.model_validate(chat) if chat else None
-
-    async def get_internal_chats_by_note_id(
-        self, note_id: str, user_id: str, db: AsyncSession | None = None
-    ) -> list[ChatModel]:
-        async with get_async_db_context(db) as session:
-            result = await session.execute(
-                select(Chat)
-                .where(
-                    Chat.user_id == user_id,
-                    Chat.meta['internal'].as_boolean().is_(True),
-                    Chat.meta['type'].as_string() == 'note',
-                    Chat.meta['note_id'].as_string() == note_id,
-                )
-                .order_by(Chat.updated_at.desc(), Chat.created_at.desc())
-            )
-            return [ChatModel.model_validate(chat) for chat in result.scalars().all()]
-
     def _chat_import_form_to_chat_model(self, user_id: str, form_data: ChatImportForm) -> ChatModel:
         id = str(uuid.uuid4())
         chat = ChatModel(
@@ -1212,6 +1179,31 @@ class ChatTable:
         try:
             async with get_async_db_context(db) as session:
                 await session.execute(update(Chat).filter_by(user_id=user_id).values(archived=True))
+                await session.commit()
+                return True
+        except Exception:
+            return False
+
+    async def archive_chats_by_ids_and_user_id(
+        self, ids: list[str], user_id: str, db: AsyncSession | None = None
+    ) -> bool:
+        if not ids:
+            return False
+        try:
+            async with get_async_db_context(db) as session:
+                result = await session.execute(
+                    update(Chat)
+                    .where(Chat.user_id == user_id, Chat.id.in_(ids))
+                    .values(
+                        archived=True,
+                        folder_id=None,
+                        updated_at=int(time.time()),
+                        last_read_at=int(time.time()),
+                    )
+                )
+                if result.rowcount != len(ids):
+                    await session.rollback()
+                    return False
                 await session.commit()
                 return True
         except Exception:

@@ -5,6 +5,7 @@
 	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { settings } from '$lib/stores';
 
+	// svelte-ignore export_let_unused\n
 	export let id: string;
 	export let token: Token;
 

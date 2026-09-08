@@ -121,10 +121,8 @@ ADMIN_CONFIG_KEYS = {
     'ENABLE_AUTOMATIONS': 'automations.enable',
     'ENABLE_CHANNELS': 'channels.enable',
     'CHANNEL_MODEL_RESPONSE_MODE': 'channels.model_response_mode',
-    'ENABLE_CALENDAR': 'calendar.enable',
     'ENABLE_MEMORIES': 'memories.enable',
     'ENABLE_MEMORY_SYSTEM_CONTEXT': 'memories.system_context.enable',
-    'ENABLE_NOTES': 'notes.enable',
     'ENABLE_USER_WEBHOOKS': 'ui.enable_user_webhooks',
     'ENABLE_USER_STATUS': 'users.enable_status',
     'PENDING_USER_OVERLAY_TITLE': 'ui.pending_user_overlay_title',
@@ -1206,10 +1204,8 @@ class AdminConfig(BaseModel):
     ENABLE_AUTOMATIONS: bool
     ENABLE_CHANNELS: bool
     CHANNEL_MODEL_RESPONSE_MODE: str = 'thread'
-    ENABLE_CALENDAR: bool
     ENABLE_MEMORIES: bool
     ENABLE_MEMORY_SYSTEM_CONTEXT: bool
-    ENABLE_NOTES: bool
     ENABLE_USER_WEBHOOKS: bool
     ENABLE_USER_STATUS: bool
     PENDING_USER_OVERLAY_TITLE: str | None = None

@@ -9,7 +9,7 @@
 		formatMessageTimestamp,
 		formatMessageTimestampFull
 	} from '$lib/utils';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
 
 	import Name from './Name.svelte';
@@ -140,7 +140,7 @@
 			<ProfileImage
 				src={user?.id
 					? `${WEBUI_API_BASE_URL}/users/${user.id}/profile/image`
-					: `${WEBUI_BASE_URL}/static/favicon.png`}
+					: `/static/favicon.png`}
 				className={'size-7 user-message-profile-image'}
 			/>
 		</div>
@@ -295,7 +295,7 @@
 									document.getElementById('confirm-edit-message-button')?.click();
 								}
 							}}
-						/>
+						></textarea>
 					</div>
 
 					<div class=" mt-2 -mx-1 flex justify-between text-sm font-normal">

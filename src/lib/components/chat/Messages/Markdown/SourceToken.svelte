@@ -3,6 +3,7 @@
 	import { decodeString } from '$lib/utils';
 	import Source from './Source.svelte';
 
+	// svelte-ignore export_let_unused\n
 	export let id;
 	export let token;
 	export let sourceIds = [];

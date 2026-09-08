@@ -736,20 +736,20 @@
 		type="button"
 		{disabled}
 		on:click={toggleOpen}
+		on:mouseenter={async () => {
+			models.set(
+				await getModels(
+					localStorage.token,
+					$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
+				)
+			);
+		}}
 	>
 		<div
 			class="flex w-full min-w-0 text-left px-0.5 bg-transparent {triggerClassName} justify-between {($settings?.highContrastMode ??
 			false)
 				? 'dark:placeholder-gray-100 placeholder-gray-800'
 				: 'placeholder-gray-400'}"
-			on:mouseenter={async () => {
-				models.set(
-					await getModels(
-						localStorage.token,
-						$config?.features?.enable_direct_connections && ($settings?.directConnections ?? null)
-					)
-				);
-			}}
 		>
 			<span class="min-w-0 flex-1 truncate">{triggerLabel}</span>
 			<ChevronDown className="ml-1 size-2.5 shrink-0 self-center" strokeWidth="2.5" />
@@ -887,7 +887,7 @@
 									listScrollTop = listContainer.scrollTop;
 								}}
 							>
-								<div style="height: {visibleStart * ITEM_HEIGHT}px;" />
+								<div style="height: {visibleStart * ITEM_HEIGHT}px;"></div>
 								{#each filteredItems.slice(visibleStart, visibleEnd) as item, i (item.value)}
 									{@const index = visibleStart + i}
 									<ModelItem
@@ -906,7 +906,7 @@
 										}}
 									/>
 								{/each}
-								<div style="height: {(filteredItems.length - visibleEnd) * ITEM_HEIGHT}px;" />
+								<div style="height: {(filteredItems.length - visibleEnd) * ITEM_HEIGHT}px;"></div>
 							</div>
 						{/if}
 
@@ -1009,11 +1009,11 @@
 						<div class="shrink-0 pb-1"></div>
 					{/if}
 
-					<div class="hidden w-[42rem]" />
-					<div class="hidden w-[28rem]" />
-					<div class="hidden w-[24rem]" />
-					<div class="hidden w-[22rem]" />
-					<div class="hidden w-[20rem]" />
+					<div class="hidden w-[42rem]"></div>
+					<div class="hidden w-[28rem]"></div>
+					<div class="hidden w-[24rem]"></div>
+					<div class="hidden w-[22rem]"></div>
+					<div class="hidden w-[20rem]"></div>
 				</slot>
 			</div>
 		</div>

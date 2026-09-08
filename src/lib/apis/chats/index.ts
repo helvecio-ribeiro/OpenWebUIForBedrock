@@ -1393,6 +1393,34 @@ export const deleteChatById = async (token: string, id: string) => {
 	return res;
 };
 
+export const deleteChatsByIds = async (token: string, chatIds: string[]) => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/batch/delete`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		},
+		body: JSON.stringify({ chat_ids: chatIds })
+	});
+	if (!res.ok) throw await res.json();
+	return res.json();
+};
+
+export const archiveChatsByIds = async (token: string, chatIds: string[]) => {
+	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/batch/archive`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			'Content-Type': 'application/json',
+			...(token && { authorization: `Bearer ${token}` })
+		},
+		body: JSON.stringify({ chat_ids: chatIds })
+	});
+	if (!res.ok) throw await res.json();
+	return res.json();
+};
+
 export const getTagsById = async (token: string, id: string) => {
 	let error = null;
 

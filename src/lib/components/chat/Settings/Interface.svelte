@@ -1202,9 +1202,9 @@
 
 			<div>
 				<div class={settingRowClass}>
-					<label id="floating-action-buttons-label" class={settingLabelClass}>
+					<div id="floating-action-buttons-label" class={settingLabelClass}>
 						{$i18n.t('Floating Quick Actions')}
-					</label>
+					</div>
 
 					<div class={settingControlClass}>
 						{#if showFloatingActionButtons}

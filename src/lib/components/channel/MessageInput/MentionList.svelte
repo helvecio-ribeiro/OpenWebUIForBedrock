@@ -6,7 +6,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Hashtag from '$lib/components/icons/Hashtag.svelte';
 	import Lock from '$lib/components/icons/Lock.svelte';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { searchUsers } from '$lib/apis/users';
 
 	export let query = '';
@@ -14,8 +14,9 @@
 	export let command: (payload: { id: string; label: string }) => void;
 	export let selectedIndex = 0;
 
+	// svelte-ignore export_let_unused\n
 	export let label = '';
-	export let triggerChar = '@';
+	// svelte-ignore export_let_unused\n	export let triggerChar = '@';
 
 	export let modelSuggestions = false;
 	export let userSuggestions = false;
@@ -197,7 +198,7 @@
 								alt={item?.data?.name ?? item.id}
 								class="rounded-full size-5 items-center mr-2"
 								on:error={(e) => {
-									e.currentTarget.src = '/favicon.png';
+									e.currentTarget.src = '/static/favicon.png';
 								}}
 							/>
 						{:else if item.type === 'user'}
@@ -206,7 +207,7 @@
 								alt={item?.label ?? item.id}
 								class="rounded-full size-5 items-center mr-2"
 								on:error={(e) => {
-									e.currentTarget.src = '/favicon.png';
+									e.currentTarget.src = '/static/favicon.png';
 								}}
 							/>
 						{/if}

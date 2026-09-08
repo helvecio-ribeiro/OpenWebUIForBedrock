@@ -6,7 +6,7 @@
 	const i18n = getContext('i18n');
 
 	export let name = '';
-	export let color = '';
+	// svelte-ignore export_let_unused\n	export let color = '';
 	export let description = '';
 	export let data = {};
 

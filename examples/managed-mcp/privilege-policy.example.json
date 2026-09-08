@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "servers": {
+    "local-system-tools": {
+      "package_path": "/opt/open-webui/examples/managed-mcp/filesystem-tools",
+      "package_digest": "REPLACE_WITH_REGISTERED_PACKAGE_DIGEST",
+      "capabilities": [
+        "system-read"
+      ]
+    }
+  }
+}

@@ -1,15 +1,15 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
-	import { getModels as _getModels } from '$lib/apis';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 
 	const dispatch = createEventDispatcher();
 	const i18n = getContext<Writable<i18nType>>('i18n');
 
-	import { models, settings, user, terminalServers } from '$lib/stores';
+	import { terminalServers, tools } from '$lib/stores';
 	import { getTerminalServers } from '$lib/apis/terminal';
+	import { getTools } from '$lib/apis/tools';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import Switch from '$lib/components/common/Switch.svelte';
@@ -20,11 +20,19 @@
 	import Cloud from '$lib/components/icons/Cloud.svelte';
 	import Connection from '$lib/components/chat/Settings/Tools/Connection.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	import AddToolServerModal from '$lib/components/AddToolServerModal.svelte';
 	import AddTerminalServerModal from '$lib/components/AddTerminalServerModal.svelte';
 	import ExternalKnowledge from './ExternalKnowledge.svelte';
 	import AdminSettingSection from './AdminSettingSection.svelte';
+	import {
+		discoverManagedMCPServices,
+		registerManagedMCPService,
+		removeManagedMCPService,
+		type DiscoveredManagedMCPService,
+		type ManagedMCPDiscovery
+	} from '$lib/apis/managed-mcp';
 
 	import {
 		getToolServerConnections,
@@ -33,6 +41,7 @@
 		setTerminalServerConnections
 	} from '$lib/apis/configs';
 
+	// svelte-ignore export_let_unused\n
 	export let saveSettings: Function;
 
 	type ToolServerConnection = any;
@@ -47,6 +56,55 @@
 
 	let servers: ToolServerConnection[] | null = null;
 	let showConnectionModal = false;
+	let managedMCPDiscovery: ManagedMCPDiscovery | null = null;
+	let managedMCPLoading = false;
+	let registeringManagedMCP: string | null = null;
+	let removingManagedMCP: string | null = null;
+	let managedMCPPendingRemoval: DiscoveredManagedMCPService | null = null;
+	let showManagedMCPRemoveConfirm = false;
+
+	const discoverManagedMCP = async () => {
+		managedMCPLoading = true;
+		try {
+			managedMCPDiscovery = await discoverManagedMCPServices(localStorage.token);
+			// Chat keeps the tool catalogue in a global store. Discovery must
+			// replace it so already-open chats see newly ready local services.
+			tools.set(await getTools(localStorage.token));
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : $i18n.t('Service discovery failed'));
+		} finally {
+			managedMCPLoading = false;
+		}
+	};
+
+	const registerManagedMCP = async (service: DiscoveredManagedMCPService) => {
+		registeringManagedMCP = service.package_path;
+		try {
+			await registerManagedMCPService(localStorage.token, service);
+			toast.success($i18n.t('Local MCP service registered'));
+			await discoverManagedMCP();
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : $i18n.t('Failed to register service'));
+			await discoverManagedMCP();
+		} finally {
+			registeringManagedMCP = null;
+		}
+	};
+
+	const removeManagedMCP = async () => {
+		if (!managedMCPPendingRemoval) return;
+		removingManagedMCP = managedMCPPendingRemoval.id;
+		try {
+			await removeManagedMCPService(localStorage.token, managedMCPPendingRemoval.id);
+			toast.success($i18n.t('Local MCP service removed'));
+			await discoverManagedMCP();
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : $i18n.t('Failed to remove service'));
+		} finally {
+			removingManagedMCP = null;
+			managedMCPPendingRemoval = null;
+		}
+	};
 
 	// Terminal server admin connections
 	let terminalConnections: TerminalConnection[] = [];
@@ -135,6 +193,16 @@
 
 <AddToolServerModal bind:show={showConnectionModal} onSubmit={addConnectionHandler} />
 
+<ConfirmDialog
+	bind:show={showManagedMCPRemoveConfirm}
+	title={$i18n.t('Remove local MCP service?')}
+	message={$i18n.t(
+		'This stops the managed service and removes its registration. The package files remain on disk and can be discovered again later.'
+	)}
+	confirmLabel={$i18n.t('Remove')}
+	on:confirm={removeManagedMCP}
+/>
+
 <AddTerminalServerModal
 	bind:show={showAddTerminalModal}
 	edit={editTerminalIdx !== null}
@@ -165,7 +233,116 @@
 
 	<div class="flex-1 min-h-0 overflow-y-auto scrollbar-hover pr-1.5">
 		{#if servers !== null}
-			<AdminSettingSection title={$i18n.t('Tools')} first>
+			<AdminSettingSection title={$i18n.t('Local MCP Services')} first>
+				<div>
+					<div class="mb-2 flex items-center justify-between gap-3">
+						<div class="text-xs text-gray-600 dark:text-gray-400">
+							{$i18n.t('Services installed on this Open WebUI server')}
+						</div>
+						<button
+							class="shrink-0 rounded-full border border-gray-200 px-3 py-1 text-xs font-medium hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800"
+							type="button"
+							disabled={managedMCPLoading}
+							on:click={discoverManagedMCP}
+						>
+							{managedMCPLoading ? $i18n.t('Discovering…') : $i18n.t('Discover Services')}
+						</button>
+					</div>
+
+					{#if managedMCPDiscovery}
+						<div class="flex flex-col gap-2">
+							{#each managedMCPDiscovery.services as service (service.package_path)}
+								<div class="rounded-xl border border-gray-100 p-3 dark:border-gray-800">
+									<div class="flex items-start justify-between gap-3">
+										<div class="min-w-0">
+											<div class="flex items-center gap-2">
+												<span class="truncate text-xs font-medium text-gray-800 dark:text-gray-200"
+													>{service.name}</span
+												>
+												<span class="text-[0.625rem] text-gray-400">v{service.version}</span>
+											</div>
+											{#if service.description}
+												<div class="mt-0.5 text-[0.6875rem] text-gray-500 dark:text-gray-400">
+													{service.description}
+												</div>
+											{/if}
+											<div
+												class="mt-1 truncate font-mono text-[0.625rem] text-gray-400"
+												title={service.package_path}
+											>
+												{service.package_path}
+											</div>
+										</div>
+
+										{#if service.discovery_state === 'available' && service.security.profile === 'confined'}
+											<button
+												class="shrink-0 rounded-full bg-black px-3 py-1 text-xs text-white disabled:opacity-50 dark:bg-white dark:text-black"
+												type="button"
+												disabled={registeringManagedMCP !== null}
+												on:click={() => registerManagedMCP(service)}
+											>
+												{registeringManagedMCP === service.package_path
+													? $i18n.t('Adding…')
+													: $i18n.t('Add')}
+											</button>
+										{:else if service.discovery_state === 'available'}
+											<span class="shrink-0 text-[0.6875rem] text-amber-600 dark:text-amber-400">
+												{$i18n.t('Privileged setup required')}
+											</span>
+										{:else if service.discovery_state === 'registered'}
+											<div class="flex shrink-0 items-center gap-2">
+												<span class="text-[0.6875rem] text-green-600 dark:text-green-400">
+													{$i18n.t('Registered')} · {service.runtime_state ?? $i18n.t('stopped')}
+												</span>
+												<button
+													class="rounded-full border border-red-200 px-3 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
+													type="button"
+													disabled={removingManagedMCP !== null}
+													on:click={() => {
+														managedMCPPendingRemoval = service;
+														showManagedMCPRemoveConfirm = true;
+													}}
+												>
+													{removingManagedMCP === service.id
+														? $i18n.t('Removing…')
+														: $i18n.t('Remove')}
+												</button>
+											</div>
+										{:else}
+											<span class="shrink-0 text-[0.6875rem] text-red-600 dark:text-red-400">
+												{$i18n.t('ID conflict')}
+											</span>
+										{/if}
+									</div>
+								</div>
+							{/each}
+						</div>
+
+						{#if managedMCPDiscovery.services.length === 0}
+							<div class="text-[0.6875rem] text-gray-400">
+								{$i18n.t('No local MCP services were found in the configured package roots.')}
+							</div>
+						{/if}
+
+						{#if managedMCPDiscovery.errors.length > 0}
+							<div
+								class="mt-2 rounded-lg bg-red-50 p-2 text-[0.6875rem] text-red-700 dark:bg-red-950/30 dark:text-red-300"
+							>
+								<div class="font-medium">{$i18n.t('Some packages could not be loaded:')}</div>
+								{#each managedMCPDiscovery.errors as error}
+									<div class="mt-1 break-all">{error.package_path}: {error.error}</div>
+								{/each}
+							</div>
+						{/if}
+					{/if}
+
+					<div class="mt-1 text-[0.6875rem] text-gray-400 dark:text-gray-600">
+						{$i18n.t('Discovery searches the package roots configured on the local MCP runtime.')}
+					</div>
+				</div>
+			</AdminSettingSection>
+
+			<AdminSettingSection title={$i18n.t('Tools')}>
 				<div>
 					<div class="mb-2 flex items-center justify-between">
 						<div class="text-xs text-gray-600 dark:text-gray-400">

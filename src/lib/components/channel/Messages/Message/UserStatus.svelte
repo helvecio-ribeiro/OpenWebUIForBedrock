@@ -4,7 +4,7 @@
 	const i18n = getContext('i18n');
 
 	import { user as _user, channels, socket } from '$lib/stores';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { getChannels, getDMChannelByUserId } from '$lib/apis/channels';
 
 	import ChatBubbles from '$lib/components/icons/ChatBubbles.svelte';
@@ -53,9 +53,8 @@
 						<div>
 							<span class="relative flex size-2">
 								<span
-									class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
-								/>
-								<span class="relative inline-flex rounded-full size-2 bg-green-500" />
+									class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+								<span class="relative inline-flex rounded-full size-2 bg-green-500"></span>
 							</span>
 						</div>
 
@@ -63,7 +62,7 @@
 					{:else}
 						<div>
 							<span class="relative flex size-2">
-								<span class="relative inline-flex rounded-full size-2 bg-gray-500" />
+								<span class="relative inline-flex rounded-full size-2 bg-gray-500"></span>
 							</span>
 						</div>
 

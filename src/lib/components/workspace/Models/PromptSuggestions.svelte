@@ -177,8 +177,7 @@
 								aria-label={$i18n.t('Content')}
 								rows="1"
 								use:autosize={prompt.content}
-								bind:value={prompt.content}
-							/>
+								bind:value={prompt.content}></textarea>
 						</Tooltip>
 					</div>
 

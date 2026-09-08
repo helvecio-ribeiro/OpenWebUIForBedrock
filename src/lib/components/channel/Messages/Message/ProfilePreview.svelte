@@ -1,4 +1,6 @@
 <script context="module" lang="ts">
+	import { writable } from 'svelte/store';
+
 	/**
 	 * At most one user profile preview may be open across all ProfilePreview
 	 * instances. bits-ui's safe-polygon close only re-evaluates on pointermove,
@@ -6,7 +8,7 @@
 	 * row while still inside the previous row's grace area; opening a preview
 	 * therefore force-closes whichever one is still up.
 	 */
-	let closeActiveProfilePreview: (() => void) | null = null;
+	const activeProfilePreviewCloser = writable<(() => void) | null>(null);
 </script>
 
 <script lang="ts">
@@ -31,14 +33,14 @@
 		}
 	};
 
-	$: if (openPreview && closeActiveProfilePreview !== closeProfilePreview) {
-		closeActiveProfilePreview?.();
-		closeActiveProfilePreview = closeProfilePreview;
+	$: if (openPreview && $activeProfilePreviewCloser !== closeProfilePreview) {
+		$activeProfilePreviewCloser?.();
+		$activeProfilePreviewCloser = closeProfilePreview;
 	}
 
 	onDestroy(() => {
-		if (closeActiveProfilePreview === closeProfilePreview) {
-			closeActiveProfilePreview = null;
+		if ($activeProfilePreviewCloser === closeProfilePreview) {
+			$activeProfilePreviewCloser = null;
 		}
 	});
 </script>

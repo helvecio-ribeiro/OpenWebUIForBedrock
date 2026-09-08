@@ -28,7 +28,7 @@
 		removeDetails,
 		removeAllDetails
 	} from '$lib/utils';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
 
 	import Name from './Name.svelte';
@@ -57,12 +57,14 @@
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 	import OutputEditView from './OutputEditView.svelte';
 	import { getOutputText, replaceOutputMessageText, type OutputItem } from './structuredOutput';
+	import { getSpeechText } from '$lib/utils/tts';
 
 	interface MessageType {
 		id: string;
 		model: string;
 		content: string;
 		output?: OutputItem[];
+		speechContent?: string;
 		files?: { type: string; url: string }[];
 		timestamp: number;
 		role: string;
@@ -113,7 +115,7 @@
 	export let chatId = '';
 	export let history;
 	export let messageId;
-	export let selectedModels = [];
+	// svelte-ignore export_let_unused\n	export let selectedModels = [];
 
 	let message: MessageType = structuredClone(history.messages[messageId]);
 	$: if (history.messages) {
@@ -144,7 +146,7 @@
 	export let updateChat: Function;
 	export let editMessage: Function;
 	export let saveMessage: Function;
-	export let rateMessage: Function;
+	// svelte-ignore export_let_unused\n	export let rateMessage: Function;
 	export let actionMessage: Function;
 	export let deleteMessage: Function;
 
@@ -153,6 +155,7 @@
 	export let regenerateResponse: Function;
 	export let forkHandler: Function | null = null;
 
+	// svelte-ignore export_let_unused\n
 	export let addMessages: Function;
 
 	export let isLastMessage = true;
@@ -161,7 +164,6 @@
 	export let compactPreview = false;
 	export let editCodeBlock = true;
 	export let topPadding = false;
-	export let onInsertToNote: ((content: string) => void) | null = null;
 
 	let citationsElement: HTMLDivElement;
 
@@ -228,8 +230,8 @@
 		$config.features?.force_audio_tts_config
 			? ($config.features.forced_audio_tts_engine ?? '')
 			: $config.features?.enable_kokoro_preload
-			? 'browser-kokoro'
-			: ($settings.audio?.tts?.engine ?? $config.audio.tts.engine);
+				? 'browser-kokoro'
+				: ($settings.audio?.tts?.engine ?? $config.audio.tts.engine);
 
 	const getVoiceId = () => {
 		if ($config.features?.force_audio_tts_config) {
@@ -251,7 +253,7 @@
 	};
 
 	const speak = async () => {
-		const content = visibleResponseContent;
+		const content = message.speechContent || getSpeechText(visibleResponseContent);
 		if (!content.trim().length) {
 			toast.info($i18n.t('No content to speak'));
 			return;
@@ -877,6 +879,9 @@
 												raw.replace(oldContent, newContent)
 											);
 										}
+										sourceMessage.speechContent = getSpeechText(
+											getOutputText(sourceMessage.output) || sourceMessage.content
+										);
 
 										updateChat();
 									}}
@@ -1082,22 +1087,6 @@
 										</svg>
 									</button>
 								</Tooltip>
-
-								{#if onInsertToNote && visibleResponseContent}
-									<Tooltip content={$i18n.t('Insert into note')} placement="bottom">
-										<button
-											aria-label={$i18n.t('Insert into note')}
-											class="{isLastMessage || ($settings?.highContrastMode ?? false)
-												? 'visible'
-												: 'invisible group-hover:visible'} rounded-lg px-2 py-1.5 text-xs text-gray-500 transition hover:bg-black/5 hover:text-black dark:hover:bg-white/5 dark:hover:text-white"
-											on:click={() => {
-												onInsertToNote?.(visibleResponseContent);
-											}}
-										>
-											{$i18n.t('Insert')}
-										</button>
-									</Tooltip>
-								{/if}
 
 								{#if !readOnly && ($user?.role === 'admin' || ($user?.permissions?.chat?.tts ?? true))}
 									<Tooltip content={$i18n.t('Read Aloud')} placement="bottom">
@@ -1349,9 +1338,10 @@
 
 									{#if $user?.role === 'admin' || ($user?.permissions?.chat?.regenerate_response ?? true)}
 										{#if $settings?.regenerateMenu ?? true}
-											<button
-												type="button"
-												class="hidden regenerate-response-button"
+							<button
+								type="button"
+								class="hidden regenerate-response-button"
+								aria-label={$i18n.t('Regenerate response')}
 												on:click={() => {
 													showRateComment = false;
 													regenerateResponse(message);
@@ -1368,7 +1358,7 @@
 														});
 													});
 												}}
-											/>
+											></button>
 
 											<RegenerateMenu
 												onRegenerate={(prompt = null) => {

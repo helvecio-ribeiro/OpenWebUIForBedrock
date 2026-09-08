@@ -16,7 +16,7 @@
 	import { formatDate } from '$lib/utils';
 
 	import { settings, user, shortCodesToEmojis } from '$lib/stores';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { getMessageData } from '$lib/apis/channels';
 
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
@@ -167,6 +167,7 @@
 
 {#if message}
 	<div
+		role="group"
 		class="swipe-reply-wrapper relative"
 		on:touchstart={handleTouchStart}
 		on:touchmove={handleTouchMove}
@@ -343,7 +344,7 @@
 									message.reply_to_message.meta.model_id}
 								class="size-4 ml-0.5 rounded-full object-cover"
 								on:error={(e) => {
-									e.currentTarget.src = '/favicon.png';
+									e.currentTarget.src = '/static/favicon.png';
 								}}
 							/>
 						{:else}
@@ -386,7 +387,7 @@
 								alt={message.meta.model_name ?? message.meta.model_id}
 								class="size-8 translate-y-1 ml-0.5 object-cover rounded-full"
 								on:error={(e) => {
-									e.currentTarget.src = '/favicon.png';
+									e.currentTarget.src = '/static/favicon.png';
 								}}
 							/>
 						{:else if message.user?.role === 'webhook'}
@@ -403,7 +404,7 @@
 							</ProfilePreview>
 						{/if}
 					{:else}
-						<!-- <div class="w-7 h-7 rounded-full bg-transparent" /> -->
+						<!-- <div class="w-7 h-7 rounded-full bg-transparent"></div> -->
 
 						{#if message.created_at}
 							<div
@@ -468,7 +469,9 @@
 									{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
 										<Image src={fileUrl} alt={file.name} imageClassName=" max-h-96 rounded-lg" />
 									{:else if file.type === 'video' || (file?.content_type ?? '').startsWith('video/')}
-										<video src={fileUrl} controls class=" max-h-96 rounded-lg"></video>
+									<!-- Uploaded videos do not have a separate captions track available. -->
+									<!-- svelte-ignore a11y-media-has-caption -->
+									<video src={fileUrl} controls class=" max-h-96 rounded-lg"></video>
 									{:else}
 										<FileItem
 											item={file}

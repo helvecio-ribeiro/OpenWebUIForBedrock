@@ -845,8 +845,7 @@
 															placeholder={$i18n.t('JSON Spec')}
 															autocomplete="off"
 															required
-															rows="5"
-														/>
+															rows="5"></textarea>
 													</div>
 												{/if}
 											</div>

@@ -57,14 +57,12 @@
 	import { deleteFileById } from '$lib/apis/files';
 	import { getChatById } from '$lib/apis/chats';
 	import { getFolderById } from '$lib/apis/folders';
-	import { getNoteById } from '$lib/apis/notes';
 	import { getSessionUser } from '$lib/apis/auths';
 
-	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
+	import { WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 	import { initiateOAuthRedirect } from '$lib/apis/configs';
 	import { matchKeybinding, Shortcut } from '$lib/shortcuts';
 
-	import { createNoteHandler } from '../notes/utils';
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
 
 	import InputMenu from './MessageInput/InputMenu.svelte';
@@ -100,8 +98,6 @@
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
 	import Knobs from '../icons/Knobs.svelte';
 	import ValvesModal from '../workspace/common/ValvesModal.svelte';
-	import Note from '../icons/Note.svelte';
-	import { goto } from '$app/navigation';
 	import InputModal from '../common/InputModal.svelte';
 	import Expand from '../icons/Expand.svelte';
 	import QueuedMessageItem from './MessageInput/QueuedMessageItem.svelte';
@@ -968,31 +964,12 @@
 		});
 	};
 
-	const createNote = async () => {
-		if (inputContent?.md.trim() === '' && inputContent?.html.trim() === '') {
-			toast.error($i18n.t('Cannot create an empty note.'));
-			return;
-		}
-
-		const res = await createNoteHandler(
-			dayjs().format('YYYY-MM-DD'),
-			inputContent?.md,
-			inputContent?.html
-		);
-
-		if (res) {
-			// Clear the input content saved in session storage.
-			sessionStorage.removeItem('chat-input');
-			goto(`/notes/${res.id}`);
-		}
-	};
-
 	const onDragOver = (e: DragEvent) => {
 		e.preventDefault();
 
 		// Check if a file or a sidebar chat/folder item is being dragged.
 		// Use a custom MIME type to distinguish intentional drags from SortableJS reorder drags
-		// (e.g. Notes, Workspace, pinned Models), which also set 'text/plain'.
+		// (e.g. pinned Models), which also set 'text/plain'.
 		if (
 			e.dataTransfer?.types?.includes('Files') ||
 			e.dataTransfer?.types?.includes('application/x-open-webui-drag')
@@ -1014,7 +991,7 @@
 		e.preventDefault();
 		console.log(e);
 
-		// Check if the dropped data is a sidebar chat, folder, note, or model item
+		// Check if the dropped data is a sidebar chat, folder, or model item
 		const textData = e.dataTransfer?.getData('text/plain');
 		if (textData) {
 			try {
@@ -1049,23 +1026,6 @@
 						};
 						if (!files.find((f) => f.id === folderItem.id)) {
 							files = [...files, folderItem];
-						}
-					}
-					dragged = false;
-					e.stopPropagation();
-					return;
-				} else if (data.type === 'note' && data.id) {
-					// Fetch the note to get its title, then add as a reference note
-					const note = await getNoteById(localStorage.token, data.id);
-					if (note) {
-						const noteItem = {
-							type: 'note',
-							id: note.id,
-							name: note.title,
-							status: 'processed'
-						};
-						if (!files.find((f) => f.id === noteItem.id)) {
-							files = [...files, noteItem];
 						}
 					}
 					dragged = false;
@@ -1476,7 +1436,7 @@
 							aria-label={$i18n.t('Generate message pair')}
 							class="hidden"
 							on:click={() => createMessagePair(prompt)}
-						/>
+						></button>
 
 						<!-- Task list display -->
 						{#if isActive && chatTasks.length > 0}
@@ -1972,8 +1932,7 @@
 
 									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
 										<div
-											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"
-										/>
+											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"></div>
 									{/if}
 
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
@@ -2435,7 +2394,7 @@
 								{@html DOMPurify.sanitize(marked($config?.license_metadata?.input_footer))}
 							</div>
 						{:else}
-							<div class="mb-1" />
+							<div class="mb-1"></div>
 						{/if}
 					</form>
 				</div>

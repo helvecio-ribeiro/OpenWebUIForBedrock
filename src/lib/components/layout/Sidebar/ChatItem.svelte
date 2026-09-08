@@ -1,4 +1,6 @@
 <script context="module" lang="ts">
+	import { writable } from 'svelte/store';
+
 	/** Shared 1×1 transparent drag preview; avoids one Image per sidebar row */
 	const invisibleDragImage = new Image();
 	invisibleDragImage.src =
@@ -11,7 +13,7 @@
 	 * while still inside the previous row's grace area; opening a preview
 	 * therefore force-closes whichever one is still up.
 	 */
-	let closeActiveHoverPreview: (() => void) | null = null;
+	const activeHoverPreviewCloser = writable<(() => void) | null>(null);
 </script>
 
 <script lang="ts">
@@ -40,7 +42,7 @@
 		settings,
 		user
 	} from '$lib/stores';
-	import { refreshChatList } from '$lib/stores/chatList';
+	import { selectedChatIds, toggleChatSelection, refreshChatList } from '$lib/stores/chatList';
 
 	import ChatMenu from './ChatMenu.svelte';
 	import DeleteConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -111,9 +113,9 @@
 		}
 	};
 
-	$: if (openPreview && closeActiveHoverPreview !== closeHoverPreview) {
-		closeActiveHoverPreview?.();
-		closeActiveHoverPreview = closeHoverPreview;
+	$: if (openPreview && $activeHoverPreviewCloser !== closeHoverPreview) {
+		$activeHoverPreviewCloser?.();
+		$activeHoverPreviewCloser = closeHoverPreview;
 	}
 
 	// Local state: tracks the last updatedAt seen while the user was viewing
@@ -346,8 +348,8 @@
 			el.removeEventListener('drag', onDrag);
 			el.removeEventListener('dragend', onDragEndHandler);
 
-			if (closeActiveHoverPreview === closeHoverPreview) {
-				closeActiveHoverPreview = null;
+			if ($activeHoverPreviewCloser === closeHoverPreview) {
+				$activeHoverPreviewCloser = null;
 			}
 		};
 	});
@@ -559,8 +561,13 @@
 						: ' hover:bg-gray-50 dark:hover:bg-gray-900 group-hover:bg-gray-50 dark:group-hover:bg-gray-900'}  whitespace-nowrap text-ellipsis transition"
 				href="/c/{id}"
 				aria-current={id === $chatId ? 'page' : undefined}
-				onclick={() => {
+				onclick={(event) => {
 					openPreview = false;
+					if (itemElement?.closest('#sidebar.chat-selection-mode') && !readonly) {
+						event.preventDefault();
+						toggleChatSelection(id);
+						return;
+					}
 					dispatch('select');
 
 					if ($selectedFolder) {
@@ -585,6 +592,21 @@
 				}}
 				draggable="false"
 			>
+				{#if !readonly}
+					<div class="chat-select-checkbox flex shrink-0 self-center" aria-hidden="true">
+						<div
+							class="size-4 rounded border items-center justify-center flex {$selectedChatIds.includes(
+								id
+							)
+								? 'bg-black border-black text-white dark:bg-white dark:border-white dark:text-black'
+								: 'border-gray-400 dark:border-gray-600'}"
+						>
+							{#if $selectedChatIds.includes(id)}<span class="text-[11px] leading-none">✓</span
+								>{/if}
+						</div>
+					</div>
+				{/if}
+
 				{#if ownerUserId}
 					<Tooltip content={ownerName || 'Unknown'}>
 						<img
@@ -639,7 +661,7 @@
 	{#if !readonly}
 		<div
 			id="sidebar-chat-item-menu"
-			class="{showInlineActions
+			class="chat-item-actions {showInlineActions
 				? 'selected'
 				: 'invisible group-hover:visible'} absolute {className === 'pr-2'
 				? 'right-[8px]'
@@ -745,3 +767,23 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.chat-select-checkbox {
+		width: 0;
+		padding-right: 0;
+		overflow: hidden;
+		visibility: hidden;
+		pointer-events: none;
+	}
+
+	:global(#sidebar.chat-selection-mode) .chat-select-checkbox {
+		width: 1.5rem;
+		padding-right: 0.5rem;
+		visibility: visible;
+	}
+
+	:global(#sidebar.chat-selection-mode) .chat-item-actions {
+		display: none;
+	}
+</style>

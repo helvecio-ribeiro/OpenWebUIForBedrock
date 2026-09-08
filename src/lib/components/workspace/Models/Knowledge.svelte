@@ -9,7 +9,6 @@
 	import Database from '$lib/components/icons/Database.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Folder from '$lib/components/icons/Folder.svelte';
-	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import XMark from '$lib/components/icons/XMark.svelte';
 
 	import { getKnowledgeBases } from '$lib/apis/knowledge';
@@ -227,8 +226,6 @@
 									<Spinner className="size-3.5" />
 								{:else if file.type === 'collection'}
 									<Database className="size-3.5" />
-								{:else if file.type === 'note'}
-									<PageEdit className="size-3.5" />
 								{:else if file.type === 'chat'}
 									<ChatBubble className="size-3.5" />
 								{:else if file.type === 'folder'}

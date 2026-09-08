@@ -62,7 +62,6 @@ BLOB_PATH_TO_KEY = {
     'automations.enable': 'ENABLE_AUTOMATIONS',
     'automations.max_count': 'AUTOMATION_MAX_COUNT',
     'automations.min_interval': 'AUTOMATION_MIN_INTERVAL',
-    'calendar.enable': 'ENABLE_CALENDAR',
     'channels.enable': 'ENABLE_CHANNELS',
     'code_execution.enable': 'ENABLE_CODE_EXECUTION',
     'code_execution.engine': 'CODE_EXECUTION_ENGINE',
@@ -143,7 +142,6 @@ BLOB_PATH_TO_KEY = {
     'models.base_models_cache': 'ENABLE_BASE_MODELS_CACHE',
     'models.default_metadata': 'DEFAULT_MODEL_METADATA',
     'models.default_params': 'DEFAULT_MODEL_PARAMS',
-    'notes.enable': 'ENABLE_NOTES',
     # OAuth — direct paths
     'oauth.admin_roles': 'OAUTH_ADMIN_ROLES',
     'oauth.allowed_domains': 'OAUTH_ALLOWED_DOMAINS',

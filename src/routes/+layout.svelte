@@ -518,38 +518,6 @@
 		const type = event?.data?.type ?? null;
 		const data = event?.data?.data ?? null;
 
-		// Calendar alerts are not chat-scoped, handle before chat_id checks
-		if (type === 'calendar:alert' && data) {
-			const timeStr =
-				data.minutes_until <= 0
-					? $i18n.t('Starting now')
-					: data.minutes_until === 1
-						? $i18n.t('Starting in 1 minute')
-						: $i18n.t('Starting in {{count}} minutes', { count: data.minutes_until });
-
-			toast.custom(NotificationToast, {
-				componentProps: {
-					onClick: () => {
-						goto('/calendar');
-					},
-					title: data.title,
-					content: timeStr
-				},
-				duration: 30000,
-				unstyled: true
-			});
-
-			if ($isLastActiveTab) {
-				if ($settings?.notificationEnabled ?? false) {
-					new Notification(`${data.title} / Open WebUI`, {
-						body: timeStr,
-						icon: `${WEBUI_BASE_URL}/static/favicon.png`
-					});
-				}
-			}
-			return;
-		}
-
 		// Session-targeted RPC calls (code execution, tool calls, direct completion)
 		// must ALWAYS be processed regardless of active chat or tab visibility,
 		// because the backend's sio.call blocks waiting for our callback response.
@@ -678,7 +646,7 @@
 						if ($settings?.notificationEnabled ?? false) {
 							new Notification(`${displayTitle} / Open WebUI`, {
 								body: contentPreview,
-								icon: `${WEBUI_BASE_URL}/static/favicon.png`
+								icon: `/static/favicon.png`
 							});
 						}
 					}
@@ -1305,7 +1273,7 @@
 
 <svelte:head>
 	<title>{$WEBUI_NAME}</title>
-	<link crossorigin="anonymous" rel="icon" href="{WEBUI_BASE_URL}/static/favicon.png" />
+	<link crossorigin="anonymous" rel="icon" href="/static/favicon.png" />
 
 	<meta name="apple-mobile-web-app-title" content={$WEBUI_NAME} />
 	<meta name="description" content={$WEBUI_NAME} />

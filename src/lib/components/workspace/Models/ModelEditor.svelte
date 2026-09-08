@@ -3,7 +3,7 @@
 
 	import { onMount, getContext, tick } from 'svelte';
 	import { models, tools, functions, user } from '$lib/stores';
-	import { WEBUI_BASE_URL, DEFAULT_CAPABILITIES } from '$lib/constants';
+	import { DEFAULT_CAPABILITIES } from '$lib/constants';
 
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
@@ -81,7 +81,7 @@
 		base_model_id: null,
 		name: '',
 		meta: {
-			profile_image_url: `${WEBUI_BASE_URL}/static/favicon.png`,
+			profile_image_url: `/static/favicon.png`,
 			description: '',
 			suggestion_prompts: null,
 			tags: []
@@ -603,7 +603,7 @@
 								<div class="flex min-w-0 flex-1 items-center gap-3">
 									<button
 										class="group relative flex size-12 shrink-0 items-center overflow-hidden rounded-xl md:size-14 {info
-											.meta.profile_image_url !== `${WEBUI_BASE_URL}/static/favicon.png`
+											.meta.profile_image_url !== `/static/favicon.png`
 											? 'bg-transparent'
 											: 'bg-gray-50 dark:bg-gray-850'} ring-1 ring-gray-200/70 transition hover:ring-gray-300 dark:ring-white/10 dark:hover:ring-white/20"
 										type="button"
@@ -620,7 +620,7 @@
 											/>
 										{:else}
 											<img
-												src="{WEBUI_BASE_URL}/static/favicon.png"
+												src="/static/favicon.png"
 												alt="model profile"
 												class="size-full object-cover"
 											/>
@@ -1041,8 +1041,7 @@
 										rows="10"
 										value={JSON.stringify(info, null, 2)}
 										disabled
-										readonly
-									/>
+										readonly></textarea>
 								</div>
 							{/if}
 						</div>

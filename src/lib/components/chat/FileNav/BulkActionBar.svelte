@@ -6,7 +6,7 @@
 	const i18n = getContext('i18n');
 
 	export let count: number = 0;
-	export let hasFiles: boolean = false;
+	// svelte-ignore export_let_unused\n	export let hasFiles: boolean = false;
 
 	export let onDelete: () => void = () => {};
 	export let onDownload: () => void = () => {};

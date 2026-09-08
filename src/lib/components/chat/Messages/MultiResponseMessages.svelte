@@ -16,7 +16,6 @@
 	import Name from './Name.svelte';
 	import Skeleton from './Skeleton.svelte';
 	import ProfileImage from './ProfileImage.svelte';
-	import { WEBUI_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
 	import { formatMessageTimestamp, formatMessageTimestampFull } from '$lib/utils';
 	const i18n = getContext('i18n');
@@ -52,7 +51,6 @@
 	export let triggerScroll: Function;
 
 	export let topPadding = false;
-	export let onInsertToNote: ((content: string) => void) | null = null;
 
 	const dispatch = createEventDispatcher();
 
@@ -258,8 +256,8 @@
 							? 'hidden'
 							: ''}"
 					>
-						<div
-							class="flex gap-2 scrollbar-none overflow-x-auto w-fit text-center font-normal bg-transparent pt-1 text-sm"
+					<div
+						class="flex gap-2 scrollbar-none overflow-x-auto w-fit text-center font-normal bg-transparent pt-1 text-sm"
 							on:wheel|preventDefault={(e) => {
 								e.currentTarget.scrollLeft += e.deltaY;
 							}}
@@ -330,7 +328,6 @@
 									{readOnly}
 									{compactPreview}
 									{topPadding}
-									{onInsertToNote}
 								/>
 							{/if}
 						{/key}
@@ -345,6 +342,8 @@
 							groupedMessageIds[modelIdx].messageIds[groupedMessageIdsIdx[modelIdx]]}
 
 						<div
+							role="button"
+							tabindex="0"
 							class="snap-center w-full max-w-full transition-all {compactPreview
 								? ''
 								: `m-1 border p-5 rounded-2xl ${
@@ -358,6 +357,12 @@
 									}`}"
 							on:click={async () => {
 								onGroupClick(_messageId, modelIdx);
+							}}
+							on:keydown={(event) => {
+								if (event.key === 'Enter' || event.key === ' ') {
+									event.preventDefault();
+									onGroupClick(_messageId, modelIdx);
+								}
 							}}
 						>
 							{#key history.currentId}
@@ -394,7 +399,6 @@
 										{compactPreview}
 										{editCodeBlock}
 										{topPadding}
-										{onInsertToNote}
 									/>
 								{/if}
 							{/key}

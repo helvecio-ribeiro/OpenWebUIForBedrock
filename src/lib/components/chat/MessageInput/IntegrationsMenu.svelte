@@ -17,6 +17,7 @@
 	import { deleteOAuthSession } from '$lib/apis/auths';
 	import { getTools } from '$lib/apis/tools';
 	import { getSkills } from '$lib/apis/skills';
+	import { updateUserSettings } from '$lib/apis/users';
 
 	import { toast } from 'svelte-sonner';
 
@@ -58,13 +59,26 @@
 	export let onShowValves: Function;
 	export let onClose: Function;
 	export let onWebSearchToggle: Function = () => {};
-	export let closeOnOutsideClick = true;
+	// svelte-ignore export_let_unused\n	export let closeOnOutsideClick = true;
 
 	let show = false;
 	let tab = '';
 
 	let tools = null;
 	let skills = null;
+
+	const persistSelectedTools = async () => {
+		const uiSettings = {
+			...$settings,
+			tools: [...new Set(selectedToolIds)]
+		};
+		settings.set(uiSettings);
+
+		await updateUserSettings(localStorage.token, { ui: uiSettings }).catch((err) => {
+			console.error('Failed to persist selected tools', err);
+			toast.error($i18n.t('Failed to save tool selection'));
+		});
+	};
 
 	$: if (show) {
 		init();
@@ -416,12 +430,13 @@
 									} else {
 										selectedToolIds = selectedToolIds.filter((id) => id !== toolId);
 									}
+									await persistSelectedTools();
 								}
 							}}
 						>
 							{#if !(tools[toolId]?.authenticated ?? true)}
 								<!-- make it slighly darker and not clickable -->
-								<div class="absolute inset-0 opacity-50 rounded-xl cursor-pointer z-10" />
+								<div class="absolute inset-0 opacity-50 rounded-xl cursor-pointer z-10"></div>
 							{/if}
 							<div class="flex-1 truncate">
 								<div class="flex flex-1 gap-2 items-center">
@@ -457,6 +472,7 @@
 													// Refresh tools to update authenticated state
 													_tools.set(await getTools(localStorage.token));
 													selectedToolIds = selectedToolIds.filter((id) => id !== toolId);
+													await persistSelectedTools();
 													await init();
 												} catch (err) {
 													toast.error(err ?? $i18n.t('Failed to disconnect'));

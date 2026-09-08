@@ -14,6 +14,7 @@
 
 	const i18n: any = getContext('i18n');
 
+	// svelte-ignore export_let_unused\n
 	export let saveHandler: Function;
 
 	let configImportInputElement: HTMLInputElement;

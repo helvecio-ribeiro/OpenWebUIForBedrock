@@ -14,7 +14,7 @@
 	import UserSettingSection from './UserSettingSection.svelte';
 	import SettingsSelect from '$lib/components/common/SettingsSelect.svelte';
 	export let saveSettings: Function;
-	export let getModels: Function;
+	// svelte-ignore export_let_unused\n	export let getModels: Function;
 
 	// General
 	let themes = ['dark', 'light', 'oled-dark'];

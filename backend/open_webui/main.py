@@ -148,7 +148,6 @@ from open_webui.routers import (
     audio,
     auths,
     automations,
-    calendar,
     channels,
     chats,
     configs,
@@ -159,10 +158,10 @@ from open_webui.routers import (
     groups,
     images,
     knowledge,
+    managed_mcp,
     memories,
     models,
     notifications,
-    notes,
     ollama,
     openai,
     pipelines,
@@ -801,6 +800,7 @@ app.include_router(audio.router, prefix='/api/v1/audio', tags=['audio'])
 app.include_router(retrieval.router, prefix='/api/v1/retrieval', tags=['retrieval'])
 
 app.include_router(configs.router, prefix='/api/v1/configs', tags=['configs'])
+app.include_router(managed_mcp.router, prefix='/api/v1/managed-mcp', tags=['managed-mcp'])
 
 app.include_router(auths.router, prefix='/api/v1/auths', tags=['auths'])
 app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
@@ -808,7 +808,6 @@ app.include_router(users.router, prefix='/api/v1/users', tags=['users'])
 
 app.include_router(channels.router, prefix='/api/v1/channels', tags=['channels'])
 app.include_router(chats.router, prefix='/api/v1/chats', tags=['chats'])
-app.include_router(notes.router, prefix='/api/v1/notes', tags=['notes'])
 
 
 app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
@@ -829,7 +828,6 @@ if ENABLE_ADMIN_ANALYTICS:
 app.include_router(utils.router, prefix='/api/v1/utils', tags=['utils'])
 app.include_router(terminals.router, prefix='/api/v1/terminals', tags=['terminals'])
 app.include_router(automations.router, prefix='/api/v1/automations', tags=['automations'])
-app.include_router(calendar.router, prefix='/api/v1/calendars', tags=['calendars'])
 
 # SCIM 2.0 API for identity management
 if ENABLE_SCIM:
@@ -2116,9 +2114,7 @@ async def get_app_config(request: Request):
         'folders.enable',
         'folders.max_file_count',
         'channels.enable',
-        'calendar.enable',
         'automations.enable',
-        'notes.enable',
         'chat.context_compaction.enable',
         'web.search.enable',
         'web.search.confirmation.enable',
@@ -2192,9 +2188,7 @@ async def get_app_config(request: Request):
                     'enable_folders': config.get('folders.enable'),
                     'folder_max_file_count': config.get('folders.max_file_count'),
                     'enable_channels': config.get('channels.enable'),
-                    'enable_calendar': config.get('calendar.enable'),
                     'enable_automations': config.get('automations.enable'),
-                    'enable_notes': config.get('notes.enable'),
                     'enable_context_compaction': config.get('chat.context_compaction.enable'),
                     'enable_web_search': config.get('web.search.enable'),
                     'enable_web_search_confirmation': config.get('web.search.confirmation.enable'),
@@ -2835,6 +2829,12 @@ async def check_db_health():
 # --- static assets & files ---
 # Serve build-time static assets (CSS, JS, images, favicon, etc.)
 app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
+
+
+@app.get('/favicon.png', include_in_schema=False)
+async def serve_favicon():
+    """Keep the conventional root favicon URL compatible with the static mount."""
+    return FileResponse(STATIC_DIR / 'favicon.png', media_type='image/png')
 
 
 @app.get('/cache/{path:path}')

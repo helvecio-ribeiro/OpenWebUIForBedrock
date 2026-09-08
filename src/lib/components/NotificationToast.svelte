@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { WEBUI_BASE_URL } from '$lib/constants';
 	import { settings, playingNotificationSound, isLastActiveTab } from '$lib/stores';
 	import DOMPurify from 'dompurify';
 	import { marked } from 'marked';
@@ -83,7 +82,8 @@
 </script>
 
 <div
-	role="status"
+	role="button"
+	tabindex="0"
 	aria-live="polite"
 	class="group relative flex gap-2.5 text-left min-w-[var(--width)] w-full dark:bg-gray-850 dark:text-white bg-white text-black border border-gray-100 dark:border-gray-800 rounded-3xl px-4 py-3.5 cursor-pointer select-none"
 	on:dragstart|preventDefault
@@ -109,7 +109,7 @@
 	</button>
 
 	<div class="shrink-0 self-top -translate-y-0.5">
-		<img src="{WEBUI_BASE_URL}/static/favicon.png" alt="favicon" class="size-6 rounded-full" />
+		<img src="/static/favicon.png" alt="favicon" class="size-6 rounded-full" />
 	</div>
 
 	<div>

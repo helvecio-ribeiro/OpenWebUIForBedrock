@@ -30,7 +30,7 @@
 
 	import ChevronUp from '$lib/components/icons/ChevronUp.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 	import { adminFeedbackCount, config } from '$lib/stores';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Select from '$lib/components/common/Select.svelte';

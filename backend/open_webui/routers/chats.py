@@ -3,6 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import tempfile
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
@@ -13,6 +18,7 @@ from open_webui.config import ENABLE_ADMIN_CHAT_ACCESS, ENABLE_ADMIN_EXPORT
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.events import EVENTS, publish_event
 from open_webui.internal.db import get_async_session
+from open_webui.env import DATA_DIR
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.config import Config
 from open_webui.models.chat_messages import ChatMessages
@@ -145,6 +151,57 @@ class ChatConfigForm(BaseModel):
 
 class CompactChatForm(BaseModel):
     model: str | None = None
+
+
+class BatchChatsForm(BaseModel):
+    chat_ids: list[str]
+
+
+class BatchArchiveResponse(BaseModel):
+    archived_count: int
+    archive_name: str
+
+
+def _unique_chat_ids(chat_ids: list[str]) -> list[str]:
+    return list(dict.fromkeys(chat_id for chat_id in chat_ids if chat_id))
+
+
+def _write_chat_archive(archive_path: Path, chats: list[dict]) -> None:
+    """Write a complete ZIP to a temporary sibling before publishing it atomically."""
+    archive_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f'.{archive_path.name}.', suffix='.tmp', dir=archive_path.parent
+    )
+    os.close(fd)
+    temporary_path = Path(temporary_name)
+    try:
+        exported_at = datetime.now(timezone.utc).isoformat()
+        manifest = {
+            'format': 'open-webui-chat-archive',
+            'version': 1,
+            'exported_at': exported_at,
+            'chat_count': len(chats),
+            'chats': [
+                {
+                    'id': chat['id'],
+                    'title': chat['title'],
+                    'file': f"chats/{chat['id']}.json",
+                }
+                for chat in chats
+            ],
+        }
+        with zipfile.ZipFile(temporary_path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
+            for chat in chats:
+                archive.writestr(
+                    f"chats/{chat['id']}.json",
+                    json.dumps(chat, ensure_ascii=False, indent=2),
+                )
+        os.chmod(temporary_path, 0o600)
+        temporary_path.replace(archive_path)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
 
 
 def chat_search_content_text(text: str) -> str:
@@ -1563,6 +1620,96 @@ async def send_chat_message_event_by_id(
 ############################
 # DeleteChatById
 ############################
+
+
+async def _get_owned_batch_chats(chat_ids: list[str], user_id: str, db: AsyncSession):
+    ids = _unique_chat_ids(chat_ids)
+    if not ids:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='Select at least one chat')
+    if len(ids) > 500:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail='At most 500 chats may be selected')
+
+    chats = []
+    for chat_id in ids:
+        chat = await Chats.get_chat_by_id_and_user_id(chat_id, user_id, db=db)
+        if not chat:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f'Chat not found: {chat_id}')
+        if is_internal_chat(chat.meta):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Internal chats cannot be selected')
+        chats.append(chat)
+    return chats
+
+
+@router.post('/batch/archive', response_model=BatchArchiveResponse)
+async def archive_selected_chats(
+    request: Request,
+    form_data: BatchChatsForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    selected = await _get_owned_batch_chats(form_data.chat_ids, user.id, db)
+    for chat in selected:
+        await stop_item_tasks(request.app.state.redis, chat.id)
+
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    archive_name = f'chats-{timestamp}-{uuid4().hex[:8]}.zip'
+    archive_path = DATA_DIR / 'archives' / user.id / archive_name
+    payload = [ChatResponse.model_validate(chat, from_attributes=True).model_dump(mode='json') for chat in selected]
+
+    try:
+        await asyncio.to_thread(_write_chat_archive, archive_path, payload)
+    except Exception as exc:
+        log.exception('Failed to create chat archive')
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Failed to create archive') from exc
+
+    ids = [chat.id for chat in selected]
+    if not await Chats.archive_chats_by_ids_and_user_id(ids, user.id, db=db):
+        archive_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Failed to archive chats')
+
+    for chat in selected:
+        await Chats.delete_orphan_tags_for_user(chat.meta.get('tags', []), user.id, threshold=1, db=db)
+        await publish_event(
+            request,
+            EVENTS.CHAT_ARCHIVED,
+            actor=user,
+            subject_id=chat.id,
+            subject_type='chat',
+        )
+    return BatchArchiveResponse(archived_count=len(ids), archive_name=archive_name)
+
+
+@router.post('/batch/delete')
+async def delete_selected_chats(
+    request: Request,
+    form_data: BatchChatsForm,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    if user.role != 'admin' and not await has_permission(
+        user.id, 'chat.delete', await Config.get('user.permissions'), db=db
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.ACCESS_PROHIBITED)
+
+    selected = await _get_owned_batch_chats(form_data.chat_ids, user.id, db)
+    deleted = 0
+    for chat in selected:
+        await stop_item_tasks(request.app.state.redis, chat.id)
+        await Chats.delete_orphan_tags_for_user(chat.meta.get('tags', []), user.id, threshold=1, db=db)
+        for child_id in await Chats.get_internal_chat_ids_by_parent_id(chat.id, user.id):
+            await stop_item_tasks(request.app.state.redis, child_id)
+            await Chats.delete_chat_by_id_and_user_id(child_id, user.id, db=db)
+        if not await Chats.delete_chat_by_id_and_user_id(chat.id, user.id, db=db):
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail='Failed to delete selected chats')
+        deleted += 1
+        await publish_event(
+            request,
+            EVENTS.CHAT_DELETED,
+            actor=user,
+            subject_id=chat.id,
+            data={'owner_id': user.id},
+        )
+    return {'deleted_count': deleted}
 
 
 @router.delete('/{id}', response_model=bool)

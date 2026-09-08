@@ -344,8 +344,7 @@
 														bind:value={variableValues[variable]}
 														autocomplete="off"
 														id="input-variable-{idx}"
-														required={variables[variable]?.required ?? false}
-													/>
+														required={variables[variable]?.required ?? false}></textarea>
 												{/if}
 											</div>
 										</div>

@@ -31,6 +31,7 @@ from open_webui.utils.access_control import (
     has_permission,
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.mcp.runtime_client import ManagedMCPRuntimeError, managed_mcp_runtime
 from open_webui.utils.plugin import (
     get_tools_cache,
     get_tool_module_from_cache,
@@ -122,8 +123,22 @@ async def get_tools(
             )
         )
 
-    # MCP Tool Servers
-    for server in await Config.get('tool_server.connections', []):
+    # Remote and locally managed MCP Tool Servers
+    mcp_connections = list(await Config.get('tool_server.connections', []) or [])
+    try:
+        managed_connections = await managed_mcp_runtime.connections()
+        configured_ids = {
+            (connection.get('info') or {}).get('id') for connection in mcp_connections
+        }
+        mcp_connections.extend(
+            connection
+            for connection in managed_connections
+            if (connection.get('info') or {}).get('id') not in configured_ids
+        )
+    except ManagedMCPRuntimeError as exc:
+        log.warning('Managed MCP runtime unavailable while listing tools: %s', exc)
+
+    for server in mcp_connections:
         if server.get('type', 'openapi') == 'mcp' and (server.get('config') or {}).get('enable'):
             info = server.get('info') or {}
             server_id = info.get('id')

@@ -262,10 +262,10 @@
 			<div class="flex items-start justify-between">
 				<div>
 					<div class=" font-normal text-lg dark:text-gray-100">
-						<a
-							href="#"
-							class="hover:underline line-clamp-1"
-							on:click|preventDefault={() => {
+					<button
+						type="button"
+						class="hover:underline line-clamp-1"
+						on:click={() => {
 								if (item.type === 'file' || item.url) {
 									let fileId = item?.id ?? item?.tempId;
 									window.open(
@@ -280,7 +280,7 @@
 							}}
 						>
 							{item?.name ?? 'File'}
-						</a>
+					</button>
 					</div>
 				</div>
 
@@ -511,8 +511,7 @@
 							src={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}
 							class="w-full border-0 rounded-lg mb-2"
 							controls
-							playsinline
-						/>
+							playsinline></audio>
 					{:else if isPDF}
 						<PDFViewer
 							url={`${WEBUI_API_BASE_URL}/files/${item.id}/content`}

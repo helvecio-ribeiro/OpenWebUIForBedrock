@@ -28,7 +28,6 @@ from open_webui.models.config import Config
 from open_webui.models.groups import Groups
 from open_webui.models.memories import Memories
 from open_webui.models.messages import Message, Messages
-from open_webui.models.notes import Notes
 from open_webui.models.users import UserModel
 from open_webui.retrieval.utils import get_content_from_url
 from open_webui.retrieval.vector.async_client import ASYNC_VECTOR_DB_CLIENT
@@ -55,9 +54,6 @@ from open_webui.routers.memories import (
     add_memory as _add_memory,
 )
 from open_webui.routers.retrieval import search_web as _search_web
-from open_webui.tasks import stop_item_tasks
-from open_webui.events import EVENTS, publish_event
-from open_webui.socket.main import sio
 from open_webui.utils.chat_id import is_saved_chat_id
 from open_webui.utils.notifications import notify_target
 from open_webui.utils.sanitize import sanitize_code
@@ -65,34 +61,6 @@ from open_webui.utils.sanitize import sanitize_code
 log = logging.getLogger(__name__)
 
 MAX_KNOWLEDGE_BASE_SEARCH_ITEMS = 10_000
-
-
-async def _has_write_access_to_note(note, user_id: str) -> bool:
-    if note.user_id == user_id:
-        return True
-
-    from open_webui.models.access_grants import AccessGrants
-
-    user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
-    return await AccessGrants.has_access(
-        user_id=user_id,
-        resource_type='note',
-        resource_id=note.id,
-        permission='write',
-        user_group_ids=set(user_group_ids),
-    )
-
-
-async def _emit_note_updated(request: Request, user: dict, note) -> None:
-    await sio.emit('events:note', note.model_dump(), to=f'note:{note.id}')
-    await publish_event(
-        request,
-        EVENTS.NOTE_UPDATED,
-        actor=user,
-        subject_id=note.id,
-        data={'title': note.title},
-    )
-
 
 async def _has_read_access_to_file(
     file,
@@ -984,383 +952,6 @@ async def list_memories(
 
 # =============================================================================
 # NOTES TOOLS
-# =============================================================================
-
-
-async def search_notes(
-    query: str,
-    count: int = 5,
-    start_timestamp: Optional[int] = None,
-    end_timestamp: Optional[int] = None,
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """
-    Search the user's saved notes by title and content.
-
-    :param query: The search query to find matching notes
-    :param count: Maximum number of results to return (default: 5)
-    :param start_timestamp: Only include notes updated after this Unix timestamp (seconds)
-    :param end_timestamp: Only include notes updated before this Unix timestamp (seconds)
-    :return: JSON with matching notes containing id, title, and content snippet
-    """
-    if __request__ is None:
-        return json.dumps({'error': 'Request context not available'})
-
-    if not __user__:
-        return json.dumps({'error': 'User context not available'})
-
-    try:
-        user_id = __user__.get('id')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
-
-        result = await Notes.search_notes(
-            user_id=user_id,
-            filter={
-                'query': query,
-                'user_id': user_id,
-                'group_ids': user_group_ids,
-                'permission': 'read',
-            },
-            skip=0,
-            limit=count * 3,  # Fetch more for filtering
-        )
-
-        # Convert timestamps to nanoseconds for comparison
-        start_ts = start_timestamp * 1_000_000_000 if start_timestamp else None
-        end_ts = end_timestamp * 1_000_000_000 if end_timestamp else None
-
-        notes = []
-        for note in result.items:
-            # Apply date filters (updated_at is in nanoseconds)
-            if start_ts and note.updated_at < start_ts:
-                continue
-            if end_ts and note.updated_at > end_ts:
-                continue
-
-            # Extract a snippet from the markdown content
-            content_snippet = ''
-            if note.data and note.data.get('content', {}).get('md'):
-                md_content = note.data['content']['md']
-                content_lower = md_content.lower()
-
-                # Find the first matching word to center the snippet around.
-                search_words = query.lower().split()
-                match_pos = -1
-                match_len = len(query)
-                for word in search_words:
-                    found_pos = content_lower.find(word)
-                    if found_pos != -1:
-                        match_pos = found_pos
-                        match_len = len(word)
-                        break
-
-                if match_pos != -1:
-                    snippet_start = max(0, match_pos - 50)
-                    snippet_end = min(len(md_content), match_pos + match_len + 100)
-                    content_snippet = (
-                        ('...' if snippet_start > 0 else '')
-                        + md_content[snippet_start:snippet_end]
-                        + ('...' if snippet_end < len(md_content) else '')
-                    )
-                else:
-                    content_snippet = md_content[:150] + ('...' if len(md_content) > 150 else '')
-
-            notes.append(
-                {
-                    'id': note.id,
-                    'title': note.title,
-                    'snippet': content_snippet,
-                    'updated_at': note.updated_at,
-                }
-            )
-
-            if len(notes) >= count:
-                break
-
-        return json.dumps(notes, ensure_ascii=False)
-    except Exception as e:
-        log.exception(f'search_notes error: {e}')
-        return json.dumps({'error': str(e)})
-
-
-async def view_note(
-    note_id: str,
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """
-    Get the full content of a note by its ID.
-
-    :param note_id: The ID of the note to retrieve
-    :return: JSON with the note's id, title, and full markdown content
-    """
-    if __request__ is None:
-        return json.dumps({'error': 'Request context not available'})
-
-    if not __user__:
-        return json.dumps({'error': 'User context not available'})
-
-    try:
-        note = await Notes.get_note_by_id(note_id)
-
-        if not note:
-            return json.dumps({'error': 'Note not found'})
-
-        # Check access permission
-        user_id = __user__.get('id')
-        user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
-
-        from open_webui.models.access_grants import AccessGrants
-
-        if (
-            __user__.get('role') != 'admin'
-            and note.user_id != user_id
-            and not await AccessGrants.has_access(
-                user_id=user_id,
-                resource_type='note',
-                resource_id=note.id,
-                permission='read',
-                user_group_ids=set(user_group_ids),
-            )
-        ):
-            return json.dumps({'error': 'Access denied'})
-
-        # Extract markdown content
-        content = ''
-        if note.data and note.data.get('content', {}).get('md'):
-            content = note.data['content']['md']
-
-        return json.dumps(
-            {
-                'id': note.id,
-                'title': note.title,
-                'content': content,
-                'updated_at': note.updated_at,
-                'created_at': note.created_at,
-            },
-            ensure_ascii=False,
-        )
-    except Exception as e:
-        log.exception(f'view_note error: {e}')
-        return json.dumps({'error': str(e)})
-
-
-async def write_note(
-    title: str,
-    content: str,
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """
-    Create a new note with the given title and content.
-
-    :param title: The title of the new note
-    :param content: The markdown content for the note
-    :return: JSON with success status and new note id
-    """
-    if __request__ is None:
-        return json.dumps({'error': 'Request context not available'})
-
-    if not __user__:
-        return json.dumps({'error': 'User context not available'})
-
-    try:
-        from open_webui.models.notes import NoteForm
-
-        user_id = __user__.get('id')
-
-        form = NoteForm(
-            title=title,
-            data={'content': {'md': content}},
-            access_grants=[],  # Private by default - only owner can access
-        )
-
-        new_note = await Notes.insert_new_note(user_id, form)
-
-        if not new_note:
-            return json.dumps({'error': 'Failed to create note'})
-
-        return json.dumps(
-            {
-                'status': 'success',
-                'id': new_note.id,
-                'title': new_note.title,
-                'created_at': new_note.created_at,
-            },
-            ensure_ascii=False,
-        )
-    except Exception as e:
-        log.exception(f'write_note error: {e}')
-        return json.dumps({'error': str(e)})
-
-
-async def replace_note_content(
-    note_id: str,
-    content: Optional[str] = None,
-    operations: Optional[list[dict]] = None,
-    title: Optional[str] = None,
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """
-    Update an existing note by replacing the whole markdown content or applying range operations.
-
-    :param note_id: The ID of the note to update
-    :param content: The new markdown content for a whole-note update
-    :param operations: Optional note operations:
-    - {"action": "replace", "content": "..."}
-    - {"action": "replace_range", "start": 0, "end": 10, "content": "...", "expected": "..."}
-    :param title: Optional new title for the note
-    :return: JSON with success status and updated note info
-    """
-    if __request__ is None:
-        return json.dumps({'error': 'Request context not available'})
-
-    if not __user__:
-        return json.dumps({'error': 'User context not available'})
-
-    try:
-        from open_webui.models.notes import NoteUpdateForm
-
-        note = await Notes.get_note_by_id(note_id)
-
-        if not note:
-            return json.dumps({'error': 'Note not found', 'code': 'not_found'})
-
-        user_id = __user__.get('id')
-        if __user__.get('role') != 'admin' and not await _has_write_access_to_note(note, user_id):
-            return json.dumps({'error': 'Write access denied', 'code': 'write_access_denied'})
-
-        current_content = ((note.data or {}).get('content') or {}).get('md') or ''
-        applied_operation_count = 0
-        if operations is not None:
-            if not isinstance(operations, list) or len(operations) == 0:
-                return json.dumps({'error': 'operations must be a non-empty list', 'code': 'invalid_operations'})
-
-            range_operations = []
-            for idx, operation in enumerate(operations):
-                if not isinstance(operation, dict):
-                    return json.dumps(
-                        {'error': 'each operation must be an object', 'code': 'invalid_operation', 'index': idx}
-                    )
-
-                action = operation.get('action')
-                replacement = operation.get('content')
-
-                if action == 'replace':
-                    if len(operations) != 1:
-                        return json.dumps(
-                            {
-                                'error': 'replace operation must be the only operation',
-                                'code': 'invalid_operations',
-                                'index': idx,
-                            }
-                        )
-                    if not isinstance(replacement, str):
-                        return json.dumps(
-                            {
-                                'error': 'replace operation content must be a string',
-                                'code': 'invalid_content',
-                                'index': idx,
-                            }
-                        )
-                    content = replacement
-                    applied_operation_count = 1
-                    break
-
-                if action != 'replace_range':
-                    return json.dumps(
-                        {'error': 'unknown operation action', 'code': 'invalid_action', 'index': idx, 'action': action}
-                    )
-
-                start = operation.get('start')
-                end = operation.get('end')
-                expected = operation.get('expected')
-                if not isinstance(start, int) or not isinstance(end, int):
-                    return json.dumps(
-                        {'error': 'operation start and end must be integers', 'code': 'invalid_range', 'index': idx}
-                    )
-                if not isinstance(replacement, str):
-                    return json.dumps(
-                        {'error': 'operation content must be a string', 'code': 'invalid_content', 'index': idx}
-                    )
-                if start < 0 or end < start or end > len(current_content):
-                    return json.dumps(
-                        {'error': 'operation range is out of bounds', 'code': 'range_out_of_bounds', 'index': idx}
-                    )
-                if expected is not None and current_content[start:end] != expected:
-                    return json.dumps(
-                        {
-                            'error': 'operation expected text does not match current content',
-                            'code': 'expected_mismatch',
-                            'index': idx,
-                        }
-                    )
-
-                range_operations.append({'start': start, 'end': end, 'content': replacement})
-
-            range_operations.sort(key=lambda operation: operation['start'])
-            previous_end = 0
-            for idx, operation in enumerate(range_operations):
-                if operation['start'] < previous_end:
-                    return json.dumps(
-                        {'error': 'operation ranges must not overlap', 'code': 'overlapping_operations', 'index': idx}
-                    )
-                previous_end = operation['end']
-
-            if range_operations:
-                content = current_content
-                for operation in reversed(range_operations):
-                    content = content[: operation['start']] + operation['content'] + content[operation['end'] :]
-                applied_operation_count = len(range_operations)
-        elif content is None:
-            return json.dumps({'error': 'content or operations is required', 'code': 'content_required'})
-
-        try:
-            await stop_item_tasks(__request__.app.state.redis, f'note:{note_id}')
-        except Exception:
-            pass
-
-        update_data = {
-            'data': {
-                **(note.data or {}),
-                'content': {
-                    **((note.data or {}).get('content') or {}),
-                    'json': None,
-                    'html': '',
-                    'md': content,
-                },
-            }
-        }
-        if title:
-            update_data['title'] = title
-
-        form = NoteUpdateForm(**update_data)
-        updated_note = await Notes.update_note_by_id(note_id, form)
-
-        if not updated_note:
-            return json.dumps({'error': 'Failed to update note', 'code': 'update_failed'})
-
-        await _emit_note_updated(__request__, __user__, updated_note)
-
-        return json.dumps(
-            {
-                'status': 'success',
-                'id': updated_note.id,
-                'title': updated_note.title,
-                'updated_at': updated_note.updated_at,
-                'applied_operation_count': applied_operation_count,
-            },
-            ensure_ascii=False,
-        )
-    except Exception as e:
-        log.exception(f'replace_note_content error: {e}')
-        return json.dumps({'error': str(e), 'code': 'unexpected_error'})
-
-
-# =============================================================================
-# CHATS TOOLS
 # =============================================================================
 
 
@@ -2856,17 +2447,17 @@ async def list_knowledge(
     __model_knowledge__: Optional[list[dict]] = None,
 ) -> str:
     """
-    List knowledge bases, files, and notes attached to the current model.
+    List knowledge bases and files attached to the current model.
     Use this first to discover what knowledge is available before querying or reading files.
     Without knowledge_id: returns KB summaries (name, description, file_count)
-    plus standalone files and notes — no file listing inside KBs.
+    plus standalone files — no file listing inside KBs.
     With knowledge_id: includes paginated file listing for that specific KB.
     Use skip/count to page through large KBs.
 
     :param knowledge_id: Optional KB ID to get file listing for
     :param skip: Number of files to skip for pagination (default: 0)
     :param count: Maximum files per page (default: 50, max: 200)
-    :return: JSON with knowledge_bases, files, and notes attached to this model
+    :return: JSON with knowledge_bases and files attached to this model
     """
     if __request__ is None:
         return json.dumps({'error': 'Request context not available'})
@@ -2875,7 +2466,7 @@ async def list_knowledge(
         return json.dumps({'error': 'User context not available'})
 
     if not __model_knowledge__:
-        return json.dumps({'knowledge_bases': [], 'files': [], 'notes': []})
+        return json.dumps({'knowledge_bases': [], 'files': []})
 
     # Coerce parameters from LLM tool calls (may come as strings)
     if isinstance(skip, str):
@@ -2897,7 +2488,6 @@ async def list_knowledge(
         from open_webui.models.access_grants import AccessGrants
         from open_webui.models.files import Files
         from open_webui.models.knowledge import Knowledges
-        from open_webui.models.notes import Notes
 
         user_id = __user__.get('id')
         user_role = __user__.get('role', 'user')
@@ -2905,7 +2495,6 @@ async def list_knowledge(
 
         knowledge_bases = []
         files = []
-        notes = []
 
         for item in __model_knowledge__:
             item_type = item.get('type')
@@ -2957,30 +2546,10 @@ async def list_knowledge(
                         }
                     )
 
-            elif item_type == 'note':
-                note = await Notes.get_note_by_id(item_id)
-                if note and (
-                    user_role == 'admin'
-                    or note.user_id == user_id
-                    or await AccessGrants.has_access(
-                        user_id=user_id,
-                        resource_type='note',
-                        resource_id=note.id,
-                        permission='read',
-                    )
-                ):
-                    notes.append(
-                        {
-                            'id': note.id,
-                            'title': note.title,
-                        }
-                    )
-
         return json.dumps(
             {
                 'knowledge_bases': knowledge_bases,
                 'files': files,
-                'notes': notes,
             },
             ensure_ascii=False,
         )
@@ -2999,7 +2568,7 @@ async def query_knowledge_files(
 ) -> str:
     """
     Search knowledge base files using semantic/vector search. Searches across collections (KBs),
-    individual files, and notes that the user has access to.
+    individual files that the user has access to.
     Helpful for internal documentation, uploaded knowledge, and attached model knowledge.
 
     :param query: The search query to find semantically relevant content
@@ -3036,7 +2605,6 @@ async def query_knowledge_files(
         from open_webui.models.access_grants import AccessGrants
         from open_webui.models.files import Files
         from open_webui.models.knowledge import Knowledges
-        from open_webui.models.notes import Notes
         from open_webui.retrieval.external import retrieve_external_knowledge
         from open_webui.retrieval.utils import query_collection
 
@@ -3051,7 +2619,6 @@ async def query_knowledge_files(
 
         collection_names = []
         external_knowledges = []
-        note_results = []  # Notes aren't vectorized, handle separately
 
         # If model has attached knowledge, use those
         if __model_knowledge__:
@@ -3083,29 +2650,6 @@ async def query_knowledge_files(
                     file = await Files.get_file_by_id(item_id)
                     if file:
                         collection_names.append(f'file-{item_id}')
-
-                elif item_type == 'note':
-                    # Note - always return full content as context
-                    note = await Notes.get_note_by_id(item_id)
-                    if note and (
-                        user_role == 'admin'
-                        or note.user_id == user_id
-                        or await AccessGrants.has_access(
-                            user_id=user_id,
-                            resource_type='note',
-                            resource_id=note.id,
-                            permission='read',
-                        )
-                    ):
-                        content = note.data.get('content', {}).get('md', '')
-                        note_results.append(
-                            {
-                                'content': content,
-                                'source': note.title,
-                                'note_id': note.id,
-                                'type': 'note',
-                            }
-                        )
 
         elif knowledge_ids:
             # User specified specific KBs
@@ -3145,9 +2689,6 @@ async def query_knowledge_files(
                     collection_names.append(knowledge_base.id)
 
         chunks = []
-
-        # Add note results first
-        chunks.extend(note_results)
 
         # Query vector collections if any
         if collection_names:
@@ -3899,464 +3440,4 @@ async def delete_automation(
         )
     except Exception as e:
         log.exception(f'delete_automation error: {e}')
-        return json.dumps({'error': str(e)})
-
-
-# =============================================================================
-# CALENDAR TOOLS
-# =============================================================================
-
-
-def _get_user_tz(user_dict: dict):
-    """Get the user's timezone as a ZoneInfo, falling back to UTC."""
-    from zoneinfo import ZoneInfo
-
-    tz_name = None
-    if user_dict:
-        tz_name = user_dict.get('timezone')
-    if tz_name:
-        try:
-            return ZoneInfo(tz_name)
-        except Exception:
-            pass
-    return ZoneInfo('UTC')
-
-
-def _dt_to_ns(dt_str: str, tz) -> int:
-    """Convert a datetime string to nanoseconds since epoch, interpreting in the given timezone."""
-    from datetime import datetime
-
-    dt = datetime.fromisoformat(dt_str)
-    # If naive (no timezone info), localize to user's timezone
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=tz)
-    return int(dt.timestamp() * 1_000) * 1_000_000
-
-
-def _ns_to_dt(ns: int, tz) -> str:
-    """Convert nanoseconds since epoch to a datetime string in the given timezone."""
-    from datetime import datetime
-
-    seconds = ns / 1_000_000_000
-    dt = datetime.fromtimestamp(seconds, tz=tz)
-    return dt.strftime('%Y-%m-%d %H:%M')
-
-
-def _event_to_dict(event, tz) -> dict:
-    """Convert a calendar event model to a human-friendly dict with local timestamps."""
-    alert_minutes = None
-    if event.meta and 'alert_minutes' in event.meta:
-        alert_minutes = event.meta['alert_minutes']
-    return {
-        'id': event.id,
-        'calendar_id': event.calendar_id,
-        'title': event.title,
-        'description': event.description or '',
-        'start': _ns_to_dt(event.start_at, tz),
-        'end': _ns_to_dt(event.end_at, tz) if event.end_at else None,
-        'all_day': event.all_day,
-        'location': event.location or '',
-        'reminder_minutes': alert_minutes if alert_minutes is not None else 10,
-        'color': event.color,
-        'is_cancelled': event.is_cancelled,
-    }
-
-
-async def search_calendar_events(
-    query: Optional[str] = None,
-    start: Optional[str] = None,
-    end: Optional[str] = None,
-    count: int = 10,
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """
-    Search calendar events, reminders, and scheduled items by text and/or date range.
-    Helpful for finding upcoming events, reminders, or schedule items.
-
-    :param query: Search text to match against event title, description, or location (optional)
-    :param start: Only return events starting at or after this datetime, e.g. "2026-04-20 00:00" (optional)
-    :param end: Only return events starting before this datetime, e.g. "2026-04-27 00:00" (optional)
-    :param count: Maximum number of events to return (default: 10)
-    :return: JSON list of matching events with id, title, description, start, end, calendar_id, location
-    """
-    if __request__ is None:
-        return json.dumps({'error': 'Request context not available'})
-
-    if not __user__:
-        return json.dumps({'error': 'User context not available'})
-
-    try:
-        from open_webui.models.calendar import CalendarEvents
-
-        user_id = __user__.get('id')
-        tz = _get_user_tz(__user__)
-
-        if isinstance(count, str):
-            try:
-                count = int(count)
-            except ValueError:
-                count = 10
-
-        if start or end:
-            # Date range query — use get_events_by_range
-            try:
-                start_ns = _dt_to_ns(start, tz) if start else 0
-            except (ValueError, TypeError) as e:
-                return json.dumps({'error': f'Invalid start datetime: {e}'})
-
-            try:
-                end_ns = (
-                    _dt_to_ns(end, tz)
-                    if end
-                    else int(time.time() * 1_000) * 1_000_000 + 365 * 86400 * 1_000_000_000_000
-                )
-            except (ValueError, TypeError) as e:
-                return json.dumps({'error': f'Invalid end datetime: {e}'})
-
-            items = await CalendarEvents.get_events_by_range(
-                user_id=user_id,
-                start=start_ns,
-                end=end_ns,
-            )
-
-            # Apply text filter if query is also provided
-            if query:
-                q = query.lower()
-                items = [
-                    e
-                    for e in items
-                    if q in (e.title or '').lower()
-                    or q in (e.description or '').lower()
-                    or q in (e.location or '').lower()
-                ]
-
-            events = [_event_to_dict(item, tz) for item in items[:count]]
-            return json.dumps(
-                {'events': events, 'total': len(items)},
-                ensure_ascii=False,
-            )
-        else:
-            # Text-only search
-            result = await CalendarEvents.search_events(
-                user_id=user_id,
-                query=query,
-                skip=0,
-                limit=count,
-            )
-
-            events = [_event_to_dict(item, tz) for item in result.items]
-            return json.dumps(
-                {'events': events, 'total': result.total},
-                ensure_ascii=False,
-            )
-    except Exception as e:
-        log.exception(f'search_calendar_events error: {e}')
-        return json.dumps({'error': str(e)})
-
-
-async def create_calendar_event(
-    title: str,
-    start: str,
-    end: Optional[str] = None,
-    description: Optional[str] = None,
-    calendar_id: Optional[str] = None,
-    all_day: bool = False,
-    location: Optional[str] = None,
-    reminder_minutes: Optional[int] = None,
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """
-    Create a calendar event, reminder, or alarm. Use this when the user wants to
-    schedule an event, set a reminder, create an alarm, or says things like
-    "remind me", "don't let me forget", "notify me at", or "add to my calendar".
-    For simple reminders, omit end/location/all_day and set reminder_minutes to 0.
-
-    :param title: Event or reminder title (e.g. "Team standup", "Take medicine", "Call mom")
-    :param start: Start datetime in the user's local time (e.g. "2026-04-20 09:00")
-    :param end: End datetime in the user's local time (optional — omit for reminders or point-in-time events)
-    :param description: Event description or notes (optional)
-    :param calendar_id: Target calendar ID (optional, uses default calendar if omitted)
-    :param all_day: Whether this is an all-day event (default: false)
-    :param location: Event location (optional)
-    :param reminder_minutes: Minutes before the event to send a notification (optional, default: 10). Use 0 for "at time of event", -1 for no notification.
-    :return: JSON with the created event details including id
-    """
-    if __request__ is None:
-        return json.dumps({'error': 'Request context not available'})
-
-    if not __user__:
-        return json.dumps({'error': 'User context not available'})
-
-    try:
-        from open_webui.models.calendar import CalendarEventForm, CalendarEvents, Calendars
-
-        user_id = __user__.get('id')
-
-        # Resolve calendar_id: use provided, or fall back to default
-        if not calendar_id:
-            calendars = await Calendars.get_calendars_by_user(user_id)
-            default_cal = next((c for c in calendars if c.is_default), None)
-            if not default_cal and calendars:
-                default_cal = calendars[0]
-            if not default_cal:
-                return json.dumps({'error': 'No calendars found. Cannot create event.'})
-            calendar_id = default_cal.id
-
-        # Verify access
-        cal = await Calendars.get_calendar_by_id(calendar_id)
-        if not cal:
-            return json.dumps({'error': 'Calendar not found'})
-        if cal.user_id != user_id and __user__.get('role') != 'admin':
-            from open_webui.models.access_grants import AccessGrants
-            from open_webui.models.groups import Groups
-
-            user_group_ids = [g.id for g in await Groups.get_groups_by_member_id(user_id)]
-            if not await AccessGrants.has_access(
-                user_id=user_id,
-                resource_type='calendar',
-                resource_id=cal.id,
-                permission='write',
-                user_group_ids=set(user_group_ids),
-            ):
-                return json.dumps({'error': 'Access denied to this calendar'})
-
-        # Coerce boolean from LLM
-        if isinstance(all_day, str):
-            all_day = all_day.lower() in ('true', '1', 'yes')
-
-        # Convert datetime strings to nanoseconds using user's timezone
-        tz = _get_user_tz(__user__)
-        try:
-            start_ns = _dt_to_ns(start, tz)
-        except (ValueError, TypeError) as e:
-            return json.dumps({'error': f'Invalid start datetime: {e}. Use format like "2026-04-20 09:00"'})
-
-        end_ns = None
-        if end:
-            try:
-                end_ns = _dt_to_ns(end, tz)
-            except (ValueError, TypeError) as e:
-                return json.dumps({'error': f'Invalid end datetime: {e}. Use format like "2026-04-20 10:00"'})
-        elif not all_day:
-            # Default to 1 hour duration
-            end_ns = start_ns + 3_600_000_000_000
-
-        # Build meta with reminder setting
-        meta = {}
-        if reminder_minutes is not None:
-            if isinstance(reminder_minutes, str):
-                try:
-                    reminder_minutes = int(reminder_minutes)
-                except ValueError:
-                    reminder_minutes = 10
-            meta['alert_minutes'] = reminder_minutes
-        else:
-            meta['alert_minutes'] = 10
-
-        form = CalendarEventForm(
-            calendar_id=calendar_id,
-            title=title,
-            description=description,
-            start_at=start_ns,
-            end_at=end_ns,
-            all_day=all_day,
-            location=location,
-            meta=meta,
-        )
-
-        event = await CalendarEvents.insert_new_event(user_id, form)
-        if not event:
-            return json.dumps({'error': 'Failed to create event'})
-
-        return json.dumps(
-            {
-                'status': 'success',
-                **_event_to_dict(event, tz),
-            },
-            ensure_ascii=False,
-        )
-    except Exception as e:
-        log.exception(f'create_calendar_event error: {e}')
-        return json.dumps({'error': str(e)})
-
-
-async def update_calendar_event(
-    event_id: str,
-    title: Optional[str] = None,
-    description: Optional[str] = None,
-    start: Optional[str] = None,
-    end: Optional[str] = None,
-    all_day: Optional[bool] = None,
-    location: Optional[str] = None,
-    is_cancelled: Optional[bool] = None,
-    reminder_minutes: Optional[int] = None,
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """
-    Update an existing calendar event. Only provided fields are changed;
-    omitted fields stay the same.
-
-    :param event_id: The ID of the event to update
-    :param title: New event title (optional)
-    :param description: New event description (optional)
-    :param start: New start datetime string in your local time, e.g. "2026-04-20 09:00" (optional)
-    :param end: New end datetime string in your local time (optional)
-    :param all_day: Whether this is an all-day event (optional)
-    :param location: New event location (optional)
-    :param is_cancelled: Set to true to cancel the event (optional)
-    :param reminder_minutes: Minutes before the event to send a reminder notification (optional). Use 0 for "at time of event", -1 for no reminder. Accepts any positive integer for custom timing (e.g. 120 for 2 hours before).
-    :return: JSON with the updated event details
-    """
-    if __request__ is None:
-        return json.dumps({'error': 'Request context not available'})
-
-    if not __user__:
-        return json.dumps({'error': 'User context not available'})
-
-    try:
-        from open_webui.models.access_grants import AccessGrants
-        from open_webui.models.calendar import CalendarEvents, CalendarEventUpdateForm, Calendars
-        from open_webui.models.groups import Groups
-
-        user_id = __user__.get('id')
-
-        event = await CalendarEvents.get_event_by_id(event_id)
-        if not event:
-            return json.dumps({'error': 'Event not found'})
-
-        # Check write access to the event's calendar
-        if event.user_id != user_id and __user__.get('role') != 'admin':
-            cal = await Calendars.get_calendar_by_id(event.calendar_id)
-            if not cal:
-                return json.dumps({'error': 'Access denied'})
-            user_group_ids = [g.id for g in await Groups.get_groups_by_member_id(user_id)]
-            if not await AccessGrants.has_access(
-                user_id=user_id,
-                resource_type='calendar',
-                resource_id=cal.id,
-                permission='write',
-                user_group_ids=set(user_group_ids),
-            ):
-                return json.dumps({'error': 'Access denied'})
-
-        # Coerce boolean strings from LLM
-        if isinstance(all_day, str):
-            all_day = all_day.lower() in ('true', '1', 'yes')
-        if isinstance(is_cancelled, str):
-            is_cancelled = is_cancelled.lower() in ('true', '1', 'yes')
-
-        # Convert datetime strings to nanoseconds using user's timezone
-        tz = _get_user_tz(__user__)
-        start_ns = None
-        if start is not None:
-            try:
-                start_ns = _dt_to_ns(start, tz)
-            except (ValueError, TypeError) as e:
-                return json.dumps({'error': f'Invalid start datetime: {e}'})
-
-        end_ns = None
-        if end is not None:
-            try:
-                end_ns = _dt_to_ns(end, tz)
-            except (ValueError, TypeError) as e:
-                return json.dumps({'error': f'Invalid end datetime: {e}'})
-
-        # Build meta update with reminder setting if provided
-        meta = None
-        if reminder_minutes is not None:
-            if isinstance(reminder_minutes, str):
-                try:
-                    reminder_minutes = int(reminder_minutes)
-                except ValueError:
-                    reminder_minutes = None
-            if reminder_minutes is not None:
-                meta = {'alert_minutes': reminder_minutes}
-
-        form = CalendarEventUpdateForm(
-            title=title,
-            description=description,
-            start_at=start_ns,
-            end_at=end_ns,
-            all_day=all_day,
-            location=location,
-            is_cancelled=is_cancelled,
-            meta=meta,
-        )
-
-        updated = await CalendarEvents.update_event_by_id(event_id, form)
-        if not updated:
-            return json.dumps({'error': 'Failed to update event'})
-
-        return json.dumps(
-            {
-                'status': 'success',
-                **_event_to_dict(updated, tz),
-            },
-            ensure_ascii=False,
-        )
-    except Exception as e:
-        log.exception(f'update_calendar_event error: {e}')
-        return json.dumps({'error': str(e)})
-
-
-async def delete_calendar_event(
-    event_id: str,
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """
-    Delete a calendar event permanently.
-
-    :param event_id: The ID of the event to delete
-    :return: JSON confirming the event was deleted
-    """
-    if __request__ is None:
-        return json.dumps({'error': 'Request context not available'})
-
-    if not __user__:
-        return json.dumps({'error': 'User context not available'})
-
-    try:
-        from open_webui.models.access_grants import AccessGrants
-        from open_webui.models.calendar import CalendarEvents, Calendars
-        from open_webui.models.groups import Groups
-
-        user_id = __user__.get('id')
-
-        event = await CalendarEvents.get_event_by_id(event_id)
-        if not event:
-            return json.dumps({'error': 'Event not found'})
-
-        # Check write access
-        if event.user_id != user_id and __user__.get('role') != 'admin':
-            cal = await Calendars.get_calendar_by_id(event.calendar_id)
-            if not cal:
-                return json.dumps({'error': 'Access denied'})
-            user_group_ids = [g.id for g in await Groups.get_groups_by_member_id(user_id)]
-            if not await AccessGrants.has_access(
-                user_id=user_id,
-                resource_type='calendar',
-                resource_id=cal.id,
-                permission='write',
-                user_group_ids=set(user_group_ids),
-            ):
-                return json.dumps({'error': 'Access denied'})
-
-        title = event.title
-        result = await CalendarEvents.delete_event_by_id(event_id)
-        if not result:
-            return json.dumps({'error': 'Failed to delete event'})
-
-        return json.dumps(
-            {
-                'status': 'success',
-                'message': f'Event "{title}" deleted',
-            },
-            ensure_ascii=False,
-        )
-    except Exception as e:
-        log.exception(f'delete_calendar_event error: {e}')
         return json.dumps({'error': str(e)})

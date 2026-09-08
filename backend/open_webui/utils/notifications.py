@@ -19,7 +19,6 @@ VALID_DELIVERY = {'away', 'always'}
 CHAT_FINISHED_EVENT = 'chat.finished'
 CHAT_FAILED_EVENT = 'chat.failed'
 CHANNEL_MESSAGE_EVENT = 'channel.message'
-CALENDAR_ALERT_EVENT = 'calendar.alert'
 
 DEFAULT_TARGET_ID = 'webhook'
 DESCRIPTION_DEFAULT = object()
@@ -319,22 +318,6 @@ def _notification_webhook_content(event: Any) -> tuple[str, str, dict[str, Any],
                 'url': url,
             },
             body,
-        )
-
-    if event.event == CALENDAR_ALERT_EVENT:
-        title = str(data.get('title') or event.message or 'Calendar alert')
-        starts_in = str(data.get('starts_in') or '')
-        message = f'**{title}**\nstarting {starts_in}'.strip()
-        return (
-            '',
-            message,
-            {
-                'action': 'calendar_alert',
-                'title': title,
-                'minutes_until': data.get('minutes_until'),
-                'event_id': data.get('event_id') or (event.subject or {}).get('id'),
-            },
-            None,
         )
 
     definition = EVENT_DEFINITIONS_BY_NAME.get(event.event)

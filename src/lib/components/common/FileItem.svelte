@@ -33,7 +33,6 @@
 
 	import DocumentPage from '../icons/DocumentPage.svelte';
 	import Database from '../icons/Database.svelte';
-	import PageEdit from '../icons/PageEdit.svelte';
 	import ChatBubble from '../icons/ChatBubble.svelte';
 	import Folder from '../icons/Folder.svelte';
 	let showModal = false;
@@ -51,11 +50,12 @@
 	<FileItemModal bind:show={showModal} bind:item {edit} />
 {/if}
 
-<button
+<div
+	role="button"
+	tabindex="0"
 	class="relative group p-1.5 {className} flex items-center gap-1 {colorClassName} {small
 		? 'rounded-xl p-2'
 		: 'rounded-2xl'} text-left"
-	type="button"
 	on:click={async () => {
 		if (item?.file?.data?.content || item?.type === 'file' || item?.content || modal) {
 			showModal = !showModal;
@@ -74,6 +74,12 @@
 		}
 
 		dispatch('click');
+	}}
+	on:keydown={(event) => {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			event.currentTarget.click();
+		}
 	}}
 >
 	{#if !small}
@@ -107,9 +113,7 @@
 				<Tooltip
 					content={type === 'collection'
 						? $i18n.t('Collection')
-						: type === 'note'
-							? $i18n.t('Note')
-							: type === 'chat'
+						: type === 'chat'
 								? $i18n.t('Chat')
 								: type === 'file'
 									? $i18n.t('File')
@@ -118,8 +122,6 @@
 				>
 					{#if type === 'collection'}
 						<Database />
-					{:else if type === 'note'}
-						<PageEdit />
 					{:else if type === 'chat'}
 						<ChatBubble />
 					{:else if type === 'folder'}
@@ -147,8 +149,6 @@
 			>
 				{#if type === 'file'}
 					{$i18n.t('File')}
-				{:else if type === 'note'}
-					{$i18n.t('Note')}
 				{:else if type === 'doc'}
 					{$i18n.t('Document')}
 				{:else if type === 'collection'}
@@ -202,4 +202,4 @@
 			</button> -->
 		</div>
 	{/if}
-</button>
+</div>

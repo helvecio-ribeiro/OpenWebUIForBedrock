@@ -68,7 +68,6 @@ def upgrade() -> None:
         ('prompt', 'prompt'),
         ('tool', 'tool'),
         ('model', 'model'),
-        ('note', 'note'),
         ('channel', 'channel'),
         ('file', 'file'),
     ]
@@ -234,7 +233,6 @@ def downgrade() -> None:
         ('prompt', 'prompt'),
         ('tool', 'tool'),
         ('model', 'model'),
-        ('note', 'note'),
         ('channel', 'channel'),
         ('file', 'file'),
     ]

@@ -168,6 +168,10 @@
 					</button>
 
 					{#if showCapabilities}
+						<!-- Events bubble from the interactive controls rendered by these child components. -->
+						<!-- svelte-ignore a11y-click-events-have-key-events -->
+						<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+						<!-- svelte-ignore a11y-no-static-element-interactions -->
 						<div class="pb-2" on:click={updateDirty} on:change={updateDirty}>
 							<Capabilities bind:capabilities={defaultCapabilities} />
 
@@ -203,6 +207,9 @@
 					</button>
 
 					{#if showParameters}
+						<!-- svelte-ignore a11y-click-events-have-key-events -->
+						<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+						<!-- svelte-ignore a11y-no-static-element-interactions -->
 						<div
 							class="max-h-[24rem] overflow-y-auto pb-2 pr-1 scrollbar-hover"
 							on:click={updateDirty}
@@ -231,7 +238,15 @@
 					</button>
 
 					{#if showPromptSuggestions}
-						<div class="pb-2" on:click={updateDirty} on:change={updateDirty} on:input={updateDirty}>
+						<!-- svelte-ignore a11y-click-events-have-key-events -->
+						<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+						<!-- svelte-ignore a11y-no-static-element-interactions -->
+						<div
+							class="pb-2"
+							on:click={updateDirty}
+							on:change={updateDirty}
+							on:input={updateDirty}
+						>
 							<PromptSuggestions bind:promptSuggestions />
 						</div>
 					{/if}

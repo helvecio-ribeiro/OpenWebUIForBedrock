@@ -1,0 +1,20 @@
+[Unit]
+Description=Open WebUI managed MCP runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/open-webui
+EnvironmentFile=-%h/open-webui/.env
+Environment=PYTHONPATH=%h/open-webui/backend
+ExecStart=%h/open-webui/backend/venv/bin/python -m open_webui.mcp_runtime.app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=%h/open-webui/backend/data %h/open-webui/examples/managed-mcp
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,43 @@
+schema_version: 1
+id: local-calendar
+name: Local Calendar
+description: Calendar operations backed by a standalone shared SQLite repository.
+version: 0.2.0
+
+runtime:
+  type: python
+  command: uv
+  args: [run, --frozen, server.py]
+  working_directory: .
+
+transport:
+  type: stdio
+
+security:
+  profile: confined
+  filesystem_roots: []
+  read_only: false
+  root_write: false
+
+environment:
+  CALENDAR_DATABASE_PATH:
+    default: ./data/shared-calendar.db
+    description: SQLite database owned by this shared calendar service.
+  CALENDAR_API_ENABLED:
+    default: "true"
+    description: Start the shared calendar REST API with the MCP process.
+  CALENDAR_API_HOST:
+    default: 127.0.0.1
+    description: Bind address for the shared calendar REST API.
+  CALENDAR_API_PORT:
+    default: "8091"
+    description: Port for the shared calendar REST API.
+  MCP_LOCAL_TIMEZONE:
+    default: America/Mexico_City
+    description: IANA timezone used to interpret and return calendar datetimes.
+
+limits:
+  startup_timeout_seconds: 30
+  call_timeout_seconds: 30
+  memory_mb: 256
+  restart: on-failure

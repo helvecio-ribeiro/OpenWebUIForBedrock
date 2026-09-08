@@ -16,7 +16,6 @@
 		showSearch,
 		mobile,
 		pinnedChats,
-		pinnedNotes,
 		temporaryChatEnabled,
 		channels,
 		socket,
@@ -33,7 +32,10 @@
 		registerFolderRefreshHandler,
 		setAllChatsRead,
 		setChatActive,
-		setChatReadAt
+		setChatReadAt,
+		chatSelectionMode,
+		selectedChatIds,
+		resetChatSelection
 	} from '$lib/stores/chatList';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 
@@ -48,6 +50,8 @@
 		updateChatFolderIdById,
 		importChats,
 		deleteAllChats,
+		deleteChatsByIds,
+		archiveChatsByIds,
 		getChatListBySearchText,
 		markChatsRead
 	} from '$lib/apis/chats';
@@ -57,10 +61,8 @@
 		getSharedFolders,
 		updateFolderParentIdById
 	} from '$lib/apis/folders';
-	import { createNewNote, getPinnedNoteList, toggleNotePinnedStatusById } from '$lib/apis/notes';
 	import { updateUserSettings } from '$lib/apis/users';
-	import { createNoteHandler } from '$lib/components/notes/utils';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import UserMenu from './Sidebar/UserMenu.svelte';
 	import ChatItem from './Sidebar/ChatItem.svelte';
@@ -77,24 +79,23 @@
 	import SearchModal from './SearchModal.svelte';
 	import FolderModal from './Sidebar/Folders/FolderModal.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
-	import PinnedNoteList from './Sidebar/PinnedNoteList.svelte';
-	import CalendarIcon from './Sidebar/icons/Calendar.svelte';
 	import ClockIcon from './Sidebar/icons/Clock.svelte';
 	import CodeIcon from './Sidebar/icons/Code.svelte';
 	import EditPencilIcon from './Sidebar/icons/EditPencil.svelte';
-	import NotesIcon from './Sidebar/icons/Notes.svelte';
 	import SearchIcon from './Sidebar/icons/Search.svelte';
 	import Sidebar from '../icons/Sidebar.svelte';
-	import WorkspaceIcon from './Sidebar/icons/Workspace.svelte';
 	import { slide } from 'svelte/transition';
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
 	import DropdownMenu from '../common/DropdownMenu.svelte';
 	import CheckIcon from '../icons/Check.svelte';
 	import MoreHorizontalIcon from './Sidebar/icons/MoreHorizontal.svelte';
+	import ArchiveBoxIcon from '$lib/components/icons/ArchiveBox.svelte';
+	import GarbageBinIcon from '$lib/components/icons/GarbageBin.svelte';
+	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
 	const BREAKPOINT = 768;
-	const DEFAULT_PINNED_ITEMS = ['notes', 'workspace'];
+	const DEFAULT_PINNED_ITEMS = [];
 
 	let scrollTop = 0;
 
@@ -123,11 +124,54 @@
 	let pinnedModels = [];
 
 	let showPinnedModels = false;
-	let showPinnedNotes = false;
 	let showChannels = false;
 	let showFolders = false;
 	let showSharedFolders = false;
 	let showChatsMenu = false;
+	let showBatchDeleteConfirm = false;
+	let batchOperationPending = false;
+
+	const finishBatchOperation = async () => {
+		const activeWasSelected = $selectedChatIds.includes($chatId);
+		resetChatSelection();
+		await refreshChatList(localStorage.token, { refreshPinned: true });
+		await Promise.all(Object.values(folderRegistry).map((folder) => folder?.setFolderItems?.()));
+		if (activeWasSelected) await goto('/');
+	};
+
+	const archiveSelectedChats = async () => {
+		if ($selectedChatIds.length === 0 || batchOperationPending) return;
+		batchOperationPending = true;
+		try {
+			const result = await archiveChatsByIds(localStorage.token, [...$selectedChatIds]);
+			await finishBatchOperation();
+			toast.success(
+				$i18n.t('{{COUNT}} chats archived to {{NAME}}', {
+					COUNT: result.archived_count,
+					NAME: result.archive_name
+				})
+			);
+		} catch (error) {
+			toast.error((error as any)?.detail ?? `${error}`);
+		} finally {
+			batchOperationPending = false;
+		}
+	};
+
+	const deleteSelectedChats = async () => {
+		if ($selectedChatIds.length === 0 || batchOperationPending) return;
+		batchOperationPending = true;
+		try {
+			const result = await deleteChatsByIds(localStorage.token, [...$selectedChatIds]);
+			await finishBatchOperation();
+			toast.success($i18n.t('{{COUNT}} chats deleted', { COUNT: result.deleted_count }));
+		} catch (error) {
+			toast.error((error as any)?.detail ?? `${error}`);
+		} finally {
+			batchOperationPending = false;
+			showBatchDeleteConfirm = false;
+		}
+	};
 
 	let folders = {};
 	let folderRegistry: Record<
@@ -149,29 +193,10 @@
 
 	const isMenuItemVisible = (id) => {
 		switch (id) {
-			case 'notes':
-				return (
-					($config?.features?.enable_notes ?? false) &&
-					($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
-				);
-			case 'workspace':
-				return (
-					$user?.role === 'admin' ||
-					$user?.permissions?.workspace?.models ||
-					$user?.permissions?.workspace?.knowledge ||
-					$user?.permissions?.workspace?.prompts ||
-					$user?.permissions?.workspace?.tools ||
-					$user?.permissions?.workspace?.skills
-				);
 			case 'automations':
 				return (
 					$config?.features?.enable_automations &&
 					($user?.role === 'admin' || $user?.permissions?.features?.automations)
-				);
-			case 'calendar':
-				return (
-					$config?.features?.enable_calendar &&
-					($user?.role === 'admin' || $user?.permissions?.features?.calendar)
 				);
 			case 'playground':
 				return $user?.role === 'admin';
@@ -182,19 +207,13 @@
 
 	const getMenuItemMeta = (id) => {
 		const items = {
-			notes: { label: 'Notes', href: '/notes', iconType: 'note' },
-			workspace: { label: 'Workspace', href: '/workspace', iconType: 'workspace' },
 			automations: { label: 'Automations', href: '/automations', iconType: 'automations' },
-			calendar: { label: 'Calendar', href: '/calendar', iconType: 'calendar' },
 			playground: { label: 'Playground', href: '/playground', iconType: 'playground' }
 		};
 		return items[id];
 	};
 
 	const menuItemPathPrefixes = {
-		notes: '/notes',
-		workspace: '/workspace',
-		calendar: '/calendar',
 		automations: '/automations',
 		playground: '/playground'
 	};
@@ -382,16 +401,6 @@
 				console.log('Init tags');
 				const _tags = await getAllTags(localStorage.token);
 				tags.set(_tags);
-			})(),
-			(async () => {
-				if (
-					$config?.features?.enable_notes &&
-					($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
-				) {
-					console.log('Init pinned notes');
-					const _pinnedNotes = await getPinnedNoteList(localStorage.token).catch(() => []);
-					pinnedNotes.set(_pinnedNotes);
-				}
 			})(),
 			(async () => {
 				console.log('Init chat list');
@@ -839,6 +848,16 @@
 	const isWindows = /Windows/i.test(navigator.userAgent);
 </script>
 
+<ConfirmDialog
+	bind:show={showBatchDeleteConfirm}
+	title={$i18n.t('Delete selected chats?')}
+	on:confirm={deleteSelectedChats}
+>
+	<div class="text-sm text-gray-500">
+		{$i18n.t('This will permanently delete {{COUNT}} chats.', { COUNT: $selectedChatIds.length })}
+	</div>
+</ConfirmDialog>
+
 <ChannelModal
 	bind:show={showCreateChannel}
 	onSubmit={async (payload: any) => {
@@ -897,7 +916,7 @@
 		on:mousedown={() => {
 			showSidebar.set(!$showSidebar);
 		}}
-	/>
+	></div>
 {/if}
 
 <SearchModal
@@ -912,11 +931,12 @@
 <button
 	id="sidebar-new-chat-button"
 	class="hidden"
+	aria-label={$i18n.t('New Chat')}
 	on:click={() => {
 		goto('/');
 		newChatHandler();
 	}}
-/>
+></button>
 
 <svelte:window
 	on:mousemove={(e) => {
@@ -956,7 +976,7 @@
 							class=" self-center flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
 						>
 							<img
-								src="{WEBUI_BASE_URL}/static/favicon.png"
+								src="/static/favicon.png"
 								class="sidebar-new-chat-icon size-5 rounded-full group-hover:hidden"
 								alt=""
 							/>
@@ -1039,14 +1059,8 @@
 												: 'bg-black/[0.035] dark:bg-white/[0.045]'
 											: 'group-hover:bg-gray-50 dark:group-hover:bg-gray-900'}"
 									>
-										{#if itemId === 'notes'}
-											<NotesIcon className="size-4" strokeWidth="1.5" />
-										{:else if itemId === 'workspace'}
-											<WorkspaceIcon className="size-4" strokeWidth="1.5" />
-										{:else if itemId === 'automations'}
+										{#if itemId === 'automations'}
 											<ClockIcon className="size-4" strokeWidth="1.5" />
-										{:else if itemId === 'calendar'}
-											<CalendarIcon className="size-4" strokeWidth="1.5" />
 										{:else if itemId === 'playground'}
 											<CodeIcon className="size-4" strokeWidth="1.5" />
 										{/if}
@@ -1109,7 +1123,9 @@
 		id="sidebar"
 		role="navigation"
 		aria-label={$i18n.t('Chat history')}
-		class="h-screen max-h-[100dvh] min-h-screen select-none {$showSidebar
+		class="h-screen max-h-[100dvh] min-h-screen select-none {$chatSelectionMode
+			? 'chat-selection-mode'
+			: ''} {$showSidebar
 			? `${$mobile ? 'bg-gray-50 dark:bg-gray-950' : 'bg-gray-50/70 dark:bg-gray-950/70'} z-50`
 			: ' bg-transparent z-0 '} {$isApp
 			? `ml-[4.5rem] md:ml-0 `
@@ -1134,7 +1150,7 @@
 				>
 					<img
 						crossorigin="anonymous"
-						src="{WEBUI_BASE_URL}/static/favicon.png"
+						src="/static/favicon.png"
 						class="sidebar-new-chat-icon size-5 rounded-full"
 						alt=""
 					/>
@@ -1249,14 +1265,8 @@
 										aria-label={$i18n.t(meta.label)}
 									>
 										<div class="self-center flex size-4 shrink-0 items-center justify-center">
-											{#if itemId === 'notes'}
-												<NotesIcon className="size-4" strokeWidth="1.5" />
-											{:else if itemId === 'workspace'}
-												<WorkspaceIcon className="size-4" strokeWidth="1.5" />
-											{:else if itemId === 'automations'}
+											{#if itemId === 'automations'}
 												<ClockIcon className="size-4" strokeWidth="1.5" />
-											{:else if itemId === 'calendar'}
-												<CalendarIcon className="size-4" strokeWidth="1.5" />
 											{:else if itemId === 'playground'}
 												<CodeIcon className="size-4" strokeWidth="1.5" />
 											{/if}
@@ -1284,24 +1294,6 @@
 					</SidebarSection>
 				{/if}
 
-				{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true)) && $pinnedNotes.length > 0}
-					<SidebarSection
-						id="sidebar-pinned-notes"
-						bind:open={showPinnedNotes}
-						className="mt-0.5"
-						name={$i18n.t('Notes')}
-						dragAndDrop={false}
-						onAdd={async () => {
-							const note = await createNoteHandler('New Note');
-							if (note) {
-								goto(`/notes/${note.id}`);
-							}
-						}}
-						onAddLabel={$i18n.t('New Note')}
-					>
-						<PinnedNoteList bind:selectedChatId />
-					</SidebarSection>
-				{/if}
 
 				{#if $config?.features?.enable_channels && ($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))}
 					<SidebarSection
@@ -1464,30 +1456,77 @@
 					}}
 				>
 					<svelte:fragment slot="action">
-						<Dropdown bind:show={showChatsMenu} align="end">
-							<Tooltip content={$i18n.t('More')}>
+						{#if $chatSelectionMode}
+							<div class="flex items-center gap-1">
+								<Tooltip content={$i18n.t('Archive selected')}>
+									<button
+										type="button"
+										class="flex size-7 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40"
+										disabled={$selectedChatIds.length === 0 || batchOperationPending}
+										on:pointerup|stopPropagation
+										on:click={archiveSelectedChats}
+										aria-label={$i18n.t('Archive selected')}
+									>
+										<ArchiveBoxIcon className="size-3.5" strokeWidth="1.7" />
+									</button>
+								</Tooltip>
+								<Tooltip content={$i18n.t('Delete selected')}>
+									<button
+										type="button"
+										class="flex size-7 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40"
+										disabled={$selectedChatIds.length === 0 || batchOperationPending}
+										on:pointerup|stopPropagation
+										on:click={() => (showBatchDeleteConfirm = true)}
+										aria-label={$i18n.t('Delete selected')}
+									>
+										<GarbageBinIcon className="size-3.5" strokeWidth="1.7" />
+									</button>
+								</Tooltip>
 								<button
 									type="button"
-									class="flex items-center justify-center w-7 h-7 rounded-lg text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400 transition-colors duration-100"
-									aria-label={$i18n.t('More')}
+									class="px-1 text-[11px] text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
 									on:pointerup|stopPropagation
+									on:click={resetChatSelection}
 								>
-									<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
+									{$i18n.t('Cancel')}
 								</button>
-							</Tooltip>
-
-							<div slot="content">
-								<DropdownMenu className="min-w-[170px]">
-									<button
-										class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
-										on:click={markAllChatsReadHandler}
-									>
-										<CheckIcon className="size-3.5" />
-										<div class="flex items-center">{$i18n.t('Mark all as read')}</div>
-									</button>
-								</DropdownMenu>
 							</div>
-						</Dropdown>
+						{:else}
+							<div class="flex items-center">
+								<button
+									type="button"
+									class="px-1 text-[11px] text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
+									on:pointerup|stopPropagation
+									on:click={() => chatSelectionMode.set(true)}
+								>
+									{$i18n.t('Select')}
+								</button>
+								<Dropdown bind:show={showChatsMenu} align="end">
+									<Tooltip content={$i18n.t('More')}>
+										<button
+											type="button"
+											class="flex items-center justify-center w-7 h-7 rounded-lg text-gray-300 hover:text-gray-500 dark:text-gray-600 dark:hover:text-gray-400 transition-colors duration-100"
+											aria-label={$i18n.t('More')}
+											on:pointerup|stopPropagation
+										>
+											<MoreHorizontalIcon className="size-3.5" strokeWidth="2" />
+										</button>
+									</Tooltip>
+
+									<div slot="content">
+										<DropdownMenu className="min-w-[170px]">
+											<button
+												class="flex h-[1.6875rem] w-full items-center gap-2 rounded-xl px-2 text-[13px] select-none cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+												on:click={markAllChatsReadHandler}
+											>
+												<CheckIcon className="size-3.5" />
+												<div class="flex items-center">{$i18n.t('Mark all as read')}</div>
+											</button>
+										</DropdownMenu>
+									</div>
+								</Dropdown>
+							</div>
+						{/if}
 					</svelte:fragment>
 
 					{#if $pinnedChats.length > 0}
@@ -1718,15 +1757,18 @@
 	</div>
 
 	{#if !$mobile}
+		<!-- The separator is a pointer drag target; keyboard resizing is handled by layout controls. -->
+		<!-- svelte-ignore a11y-no-static-element-interactions -->
+		<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 		<div
 			class="relative flex items-center justify-center group border-l border-gray-50 dark:border-gray-850/30 hover:border-gray-200 dark:hover:border-gray-800 transition z-20"
 			id="sidebar-resizer"
 			on:mousedown={resizeStartHandler}
 			role="separator"
+			aria-label={$i18n.t('Resize sidebar')}
 		>
 			<div
-				class=" absolute -left-1.5 -right-1.5 -top-0 -bottom-0 z-20 cursor-col-resize bg-transparent"
-			/>
+				class=" absolute -left-1.5 -right-1.5 -top-0 -bottom-0 z-20 cursor-col-resize bg-transparent"></div>
 		</div>
 	{/if}
 {/if}

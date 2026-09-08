@@ -75,6 +75,24 @@ class EventDefinitions(BaseModel):
         description='Tool server configuration was updated.',
         message='Config Tool Servers updated',
     )
+    MANAGED_MCP_REGISTERED: EventDefinition = EventDefinition(
+        name='managed_mcp.registered', description='A managed MCP server was registered.'
+    )
+    MANAGED_MCP_UPDATED: EventDefinition = EventDefinition(
+        name='managed_mcp.updated', description='A managed MCP server configuration was updated.'
+    )
+    MANAGED_MCP_STARTED: EventDefinition = EventDefinition(
+        name='managed_mcp.started', description='A managed MCP server was started.'
+    )
+    MANAGED_MCP_STOPPED: EventDefinition = EventDefinition(
+        name='managed_mcp.stopped', description='A managed MCP server was stopped.'
+    )
+    MANAGED_MCP_RESTARTED: EventDefinition = EventDefinition(
+        name='managed_mcp.restarted', description='A managed MCP server was restarted.'
+    )
+    MANAGED_MCP_REMOVED: EventDefinition = EventDefinition(
+        name='managed_mcp.removed', description='A managed MCP server was removed.'
+    )
     CONFIG_TERMINAL_SERVERS_UPDATED: EventDefinition = EventDefinition(
         name='config.terminal_servers.updated',
         description='Terminal server configuration was updated.',
@@ -314,24 +332,6 @@ class EventDefinitions(BaseModel):
     FOLDER_DELETED: EventDefinition = EventDefinition(
         name='folder.deleted', description='A folder was deleted.', message='Folder deleted'
     )
-    NOTE_CREATED: EventDefinition = EventDefinition(
-        name='note.created', description='A note was created.', message='Note created'
-    )
-    NOTE_UPDATED: EventDefinition = EventDefinition(
-        name='note.updated', description='A note was updated.', message='Note updated'
-    )
-    NOTE_ACCESS_UPDATED: EventDefinition = EventDefinition(
-        name='note.access_updated', description='Note access was updated.', message='Note access updated'
-    )
-    NOTE_PINNED: EventDefinition = EventDefinition(
-        name='note.pinned', description='A note was pinned.', message='Note pinned'
-    )
-    NOTE_UNPINNED: EventDefinition = EventDefinition(
-        name='note.unpinned', description='A note was unpinned.', message='Note unpinned'
-    )
-    NOTE_DELETED: EventDefinition = EventDefinition(
-        name='note.deleted', description='A note was deleted.', message='Note deleted'
-    )
     MEMORY_CREATED: EventDefinition = EventDefinition(
         name='memory.created', description='A memory was created.', message='Memory created'
     )
@@ -559,39 +559,6 @@ class EventDefinitions(BaseModel):
     PIPELINE_VALVES_UPDATED: EventDefinition = EventDefinition(
         name='pipeline.valves_updated', description='Pipeline valves were updated.', message='Pipeline valves updated'
     )
-    CALENDAR_CREATED: EventDefinition = EventDefinition(
-        name='calendar.created', description='A calendar was created.', message='Calendar created'
-    )
-    CALENDAR_UPDATED: EventDefinition = EventDefinition(
-        name='calendar.updated', description='A calendar was updated.', message='Calendar updated'
-    )
-    CALENDAR_DELETED: EventDefinition = EventDefinition(
-        name='calendar.deleted', description='A calendar was deleted.', message='Calendar deleted'
-    )
-    CALENDAR_DEFAULT_UPDATED: EventDefinition = EventDefinition(
-        name='calendar.default_updated',
-        description='The default calendar was updated.',
-        message='Calendar default updated',
-    )
-    CALENDAR_EVENT_CREATED: EventDefinition = EventDefinition(
-        name='calendar.event.created', description='A calendar event was created.', message='Calendar Event created'
-    )
-    CALENDAR_EVENT_UPDATED: EventDefinition = EventDefinition(
-        name='calendar.event.updated', description='A calendar event was updated.', message='Calendar Event updated'
-    )
-    CALENDAR_EVENT_DELETED: EventDefinition = EventDefinition(
-        name='calendar.event.deleted', description='A calendar event was deleted.', message='Calendar Event deleted'
-    )
-    CALENDAR_EVENT_RSVP_UPDATED: EventDefinition = EventDefinition(
-        name='calendar.event.rsvp_updated',
-        description='A calendar event RSVP was updated.',
-        message='Calendar Event rsvp updated',
-    )
-    CALENDAR_ALERT: EventDefinition = EventDefinition(
-        name='calendar.alert',
-        description='A calendar event alert was triggered.',
-        message='Calendar alert',
-    )
     AUTOMATION_CREATED: EventDefinition = EventDefinition(
         name='automation.created', description='An automation was created.', message='Automation created'
     )
@@ -665,7 +632,6 @@ NOTIFICATION_EVENTS = (
     EVENTS.CHAT_FINISHED.name,
     EVENTS.CHAT_FAILED.name,
     EVENTS.CHANNEL_MESSAGE.name,
-    EVENTS.CALENDAR_ALERT.name,
 )
 
 

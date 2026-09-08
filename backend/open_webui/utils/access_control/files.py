@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
-FOLDER_FILE_TYPES = {'file', 'collection', 'note'}
+FOLDER_FILE_TYPES = {'file', 'collection'}
 
 
 async def has_access_to_file(
@@ -125,7 +125,7 @@ async def get_accessible_folder_files(
 ) -> list[dict]:
     """Filter folder.data['files'] entries to those the caller can read.
 
-    Entries carry a 'type' ('file', 'collection' or 'note') and 'id'. Entries of any other
+    Entries carry a 'type' ('file' or 'collection') and 'id'. Entries of any other
     shape are dropped because they cannot be access-checked.
     """
     if not isinstance(entries, list):
@@ -150,22 +150,6 @@ async def get_accessible_folder_files(
                 accessible.append(entry)
         elif entry_type == 'collection':
             if await Knowledges.check_access_by_user_id(entry_id, user.id, 'read', db=db):
-                accessible.append(entry)
-        elif entry_type == 'note':
-            # Owner has no self-grant (notes are private by default), so check ownership too.
-            from open_webui.models.notes import Notes
-
-            note = await Notes.get_note_by_id(entry_id, db=db)
-            if note and (
-                note.user_id == user.id
-                or await AccessGrants.has_access(
-                    user_id=user.id,
-                    resource_type='note',
-                    resource_id=entry_id,
-                    permission='read',
-                    db=db,
-                )
-            ):
                 accessible.append(entry)
     return accessible
 

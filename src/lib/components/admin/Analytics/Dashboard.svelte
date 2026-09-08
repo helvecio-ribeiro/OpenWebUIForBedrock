@@ -482,7 +482,7 @@
 											alt={model.name}
 											class="size-5 rounded-full object-cover shrink-0"
 											on:error={(e) => {
-												e.target.src = '/favicon.png';
+												e.target.src = '/static/favicon.png';
 											}}
 										/>
 										<span class="truncate max-w-[150px]">{model.name}</span>

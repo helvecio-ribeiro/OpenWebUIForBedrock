@@ -68,6 +68,7 @@
 	import { AudioQueue } from '$lib/utils/audio';
 	import { createTemporaryChatId, isTemporaryChatId } from '$lib/utils/chatId';
 	import { getOutputText } from './Messages/structuredOutput';
+	import { getSpeechText } from '$lib/utils/tts';
 
 	import {
 		archiveChatById,
@@ -83,7 +84,7 @@
 	} from '$lib/apis/chats';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import { processWeb, processWebSearch, processYoutubeVideo } from '$lib/apis/retrieval';
-	import { getAndUpdateUserLocation, getUserSettings } from '$lib/apis/users';
+	import { getAndUpdateUserLocation, getUserSettings, updateUserSettings } from '$lib/apis/users';
 	import {
 		generateQueries,
 		chatAction,
@@ -127,8 +128,6 @@
 	export let embeddedChats = [];
 	export let embeddedDraftKey = '';
 	export let suggestedPrompts = [];
-	export let selectedText = '';
-	export let onInsertToNote: ((content: string) => void) | null = null;
 	export let onCloseEmbedded: (() => void) | null = null;
 	export let onNewEmbeddedChat: (() => void | Promise<void>) | null = null;
 	export let onCreateEmbeddedChat: (() => any | Promise<any>) | null = null;
@@ -138,8 +137,8 @@
 		null;
 
 	let loading = true;
-	$: chatContainerId = embedded ? 'note-chat-container' : 'chat-container';
-	$: messageInputDropzoneId = embedded ? 'note-chat-input-dropzone' : 'chat-pane';
+	$: chatContainerId = embedded ? 'embedded-chat-container' : 'chat-container';
+	$: messageInputDropzoneId = embedded ? 'embedded-chat-input-dropzone' : 'chat-pane';
 
 	const eventTarget = new EventTarget();
 	let controlPane: Pane | undefined;
@@ -520,13 +519,10 @@
 			return true;
 		});
 	};
-	const withSelectedText = (text: string) =>
-		embedded && selectedText?.trim()
-			? `${text}\n\nSelected note text for replace_note_content operations:\n${selectedText.trim()}`
-			: text;
-	const noteChatDebug = (message: string, data: Record<string, unknown> = {}) => {
+	const withSelectedText = (text: string) => text;
+	const embeddedChatDebug = (message: string, data: Record<string, unknown> = {}) => {
 		if (!embedded) return;
-		console.info('[note-chat]', message, {
+		console.info('[embedded-chat]', message, {
 			chatIdProp,
 			activeChatId: $chatId,
 			loading,
@@ -535,7 +531,7 @@
 	};
 
 	$: if (chatIdProp && chatIdProp !== loadedChatIdProp) {
-		noteChatDebug('chatIdProp changed; loading linked chat', {
+		embeddedChatDebug('chatIdProp changed; loading linked chat', {
 			previousChatIdProp: loadedChatIdProp
 		});
 		loadedChatIdProp = chatIdProp;
@@ -543,7 +539,7 @@
 	}
 
 	$: if (embedded && embeddedDraftKey && embeddedDraftKey !== currentDraftKey) {
-		noteChatDebug('embedded draft requested', { embeddedDraftKey });
+		embeddedChatDebug('embedded draft requested', { embeddedDraftKey });
 		currentDraftKey = embeddedDraftKey;
 		initEmbeddedDraft();
 	}
@@ -555,11 +551,11 @@
 	}
 
 	const navigateHandler = async () => {
-		noteChatDebug('navigateHandler start');
+		embeddedChatDebug('navigateHandler start');
 		// Mark the outgoing chat as read before loading the new one.
 		// $chatId still holds the previous chat here — loadChat() updates it.
 		if ($chatId && $chatId !== chatIdProp && !$temporaryChatEnabled) {
-			noteChatDebug('marking outgoing chat read', { outgoingChatId: $chatId });
+			embeddedChatDebug('marking outgoing chat read', { outgoingChatId: $chatId });
 			updateLastReadAt($chatId);
 		}
 
@@ -582,11 +578,11 @@
 		);
 
 		const loaded = chatIdProp ? await loadChat() : false;
-		noteChatDebug('loadChat completed inside navigateHandler', { loaded });
+		embeddedChatDebug('loadChat completed inside navigateHandler', { loaded });
 		if (loaded) {
 			await tick();
 			loading = false;
-			noteChatDebug('embedded chat loading false');
+			embeddedChatDebug('embedded chat loading false');
 			window.setTimeout(() => scrollToBottom(), 0);
 
 			await tick();
@@ -618,9 +614,12 @@
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
 					}
 				} catch (e) {}
-			} else {
-				await setDefaults();
 			}
+
+			// A saved draft contains the transient input state from when it was written.
+			// It must not prevent subsequently configured user/model defaults (notably
+			// persistent MCP tool selections) from being applied when the chat opens.
+			await setDefaults();
 
 			const chatInput = document.getElementById('chat-input');
 			chatInput?.focus();
@@ -628,7 +627,7 @@
 			await goto('/');
 		} else {
 			loading = false;
-			console.warn('[note-chat] embedded load failed; clearing spinner', {
+			console.warn('[embedded-chat] embedded load failed; clearing spinner', {
 				chatIdProp,
 				activeChatId: $chatId
 			});
@@ -779,20 +778,20 @@
 			const model = atSelectedModel ?? $models.find((m) => m.id === selectedModels[0]);
 			if (model) {
 				// Set Default Tools
-				if (model?.info?.meta?.toolIds) {
-					const defaultIds = [
-						...new Set(
-							[...(model?.info?.meta?.toolIds ?? [])].filter((id) =>
-								$tools.find((t) => t.id === id)
-							)
-						)
-					];
+				const configuredToolIds = [
+					...new Set([...($settings?.tools ?? []), ...(model?.info?.meta?.toolIds ?? [])])
+				].filter(
+					(id) => ($tools ?? []).find((tool) => tool.id === id) || id.startsWith('direct_server:')
+				);
+
+				if (configuredToolIds.length > 0) {
+					const defaultIds = configuredToolIds;
 
 					// Separate unauthenticated OAuth tools
 					const unauthed = [];
 					const authed = [];
 					for (const id of defaultIds) {
-						const tool = $tools.find((t) => t.id === id);
+						const tool = ($tools ?? []).find((t) => t.id === id);
 						if (tool && tool.authenticated === false) {
 							const parts = id.split(':');
 							const serverId = parts.at(-1) ?? id;
@@ -806,8 +805,6 @@
 					selectedToolIds = authed;
 					pendingOAuthTools = unauthed;
 					await continueOAuthRedirect();
-				} else if ($settings?.tools) {
-					selectedToolIds = $settings.tools;
 				} else {
 					selectedToolIds = selectedToolIds.filter((id) => !id.startsWith('direct_server:'));
 				}
@@ -1628,8 +1625,13 @@
 			return;
 		}
 
+		const displayContent =
+			getOutputText(message?.output) || removeAllDetails(message?.content ?? '');
+		const speechContent = final
+			? (message?.speechContent ?? getSpeechText(displayContent))
+			: getSpeechText(displayContent);
 		const messageContentParts = getMessageContentParts(
-			getOutputText(message?.output) || removeAllDetails(message?.content ?? ''),
+			speechContent,
 			$config?.audio?.tts?.split_on ?? 'punctuation'
 		);
 		if (!final) {
@@ -1892,6 +1894,11 @@
 			sessionStorage.removeItem('pendingOAuthToolId');
 			if (!selectedToolIds.includes(pendingToolId)) {
 				selectedToolIds = [...selectedToolIds, pendingToolId];
+				const uiSettings = { ...$settings, tools: selectedToolIds };
+				settings.set(uiSettings);
+				await updateUserSettings(localStorage.token, { ui: uiSettings }).catch((err) =>
+					console.error('Failed to persist OAuth tool selection', err)
+				);
 			}
 		}
 
@@ -1960,18 +1967,18 @@
 	};
 
 	const loadChat = async () => {
-		noteChatDebug('loadChat start');
+		embeddedChatDebug('loadChat start');
 		// chatIdProp is empty for chats started from the home page (URL set via replaceState)
 		chatId.set(chatIdProp || $chatId);
-		noteChatDebug('loadChat set active chat id');
+		embeddedChatDebug('loadChat set active chat id');
 
 		if ($temporaryChatEnabled) {
-			noteChatDebug('loadChat disabling temporary chat');
+			embeddedChatDebug('loadChat disabling temporary chat');
 			temporaryChatEnabled.set(false);
 		}
 
 		chat = await getChatById(localStorage.token, $chatId).catch(async (error) => {
-			console.error('[note-chat] getChatById failed', {
+			console.error('[embedded-chat] getChatById failed', {
 				chatIdProp,
 				activeChatId: $chatId,
 				error
@@ -1981,7 +1988,7 @@
 			}
 			return null;
 		});
-		noteChatDebug('getChatById completed', {
+		embeddedChatDebug('getChatById completed', {
 			found: !!chat,
 			chatId: chat?.id,
 			hasChatPayload: !!chat?.chat,
@@ -1990,20 +1997,20 @@
 
 		if (chat) {
 			tags = await getTagsById(localStorage.token, $chatId).catch(async (error) => {
-				console.warn('[note-chat] getTagsById failed; continuing without tags', {
+				console.warn('[embedded-chat] getTagsById failed; continuing without tags', {
 					chatIdProp,
 					activeChatId: $chatId,
 					error
 				});
 				return [];
 			});
-			noteChatDebug('getTagsById completed', { tagCount: tags?.length ?? 0 });
+			embeddedChatDebug('getTagsById completed', { tagCount: tags?.length ?? 0 });
 
 			const chatContent = chat.chat;
 			chatVariables = chat?.variables ?? {};
 
 			if (chatContent) {
-				noteChatDebug('chat payload found', {
+				embeddedChatDebug('chat payload found', {
 					models: chatContent?.models,
 					hasHistory: !!chatContent?.history,
 					messageCount: Object.keys(chatContent?.history?.messages ?? {}).length
@@ -2022,7 +2029,7 @@
 					(selectedModels.length === 1 && selectedModels[0] === '')
 				) {
 					selectedModels = normalizeSelectedModels(selectedModels);
-					noteChatDebug('normalized empty selected models after load', { selectedModels });
+					embeddedChatDebug('normalized empty selected models after load', { selectedModels });
 				}
 
 				oldSelectedModelIds = structuredClone(selectedModels);
@@ -2042,7 +2049,6 @@
 				chatTitle.set(chatContent.title);
 
 				params = structuredClone(chatContent?.params ?? {});
-				delete params.note_id;
 				chatFiles = structuredClone(chatContent?.files ?? []);
 
 				// Load tasks from chat-level DB field
@@ -2074,19 +2080,19 @@
 				const pendingTaskIds = await getTaskIdsByChatId(localStorage.token, $chatId)
 					.then((res) => res?.task_ids ?? [])
 					.catch((error) => {
-						console.warn('[note-chat] getTaskIdsByChatId failed; continuing without tasks', {
+						console.warn('[embedded-chat] getTaskIdsByChatId failed; continuing without tasks', {
 							chatIdProp,
 							activeChatId: $chatId,
 							error
 						});
 						return [];
 					});
-				noteChatDebug('task reconciliation completed', {
+				embeddedChatDebug('task reconciliation completed', {
 					pendingTaskCount: pendingTaskIds.length,
 					hasCurrentMessage: !!currentMessage
 				});
 				if (taskIds !== activeTaskIds) {
-					noteChatDebug('task ids changed during load; aborting stale load');
+					embeddedChatDebug('task ids changed during load; aborting stale load');
 					return;
 				}
 				const responseComplete = currentMessage?.role === 'assistant' && currentMessage?.done;
@@ -2105,7 +2111,7 @@
 
 				return true;
 			} else {
-				console.warn('[note-chat] chat response missing chat payload', {
+				console.warn('[embedded-chat] chat response missing chat payload', {
 					chatIdProp,
 					activeChatId: $chatId,
 					chat
@@ -2113,7 +2119,7 @@
 				return null;
 			}
 		}
-		console.warn('[note-chat] no chat returned from getChatById', {
+		console.warn('[embedded-chat] no chat returned from getChatById', {
 			chatIdProp,
 			activeChatId: $chatId
 		});
@@ -2458,6 +2464,7 @@
 			message.done = true;
 			const visibleContent =
 				getOutputText(message?.output) || removeAllDetails(message?.content ?? '');
+			message.speechContent = getSpeechText(visibleContent);
 
 			if ($settings.responseAutoCopy) {
 				copyToClipboard(visibleContent);
@@ -2510,13 +2517,17 @@
 	// Chat functions
 	//////////////////////////
 
-	const submitPrompt = async (inputContent, inputFiles) => {
+	const submitPrompt = async (
+		inputContent,
+		inputFiles,
+		{ voiceControl = null }: { voiceControl?: 'exit' | null } = {}
+	) => {
 		const _files = structuredClone(inputFiles);
 
 		chatFiles.push(
 			..._files.filter(
 				(item) =>
-					['doc', 'text', 'note', 'chat', 'folder', 'collection'].includes(item.type) ||
+					['doc', 'text', 'chat', 'folder', 'collection'].includes(item.type) ||
 					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
 			)
 		);
@@ -2535,7 +2546,8 @@
 			content: inputContent,
 			files: _files.length > 0 ? _files : undefined,
 			timestamp: Math.floor(Date.now() / 1000), // Unix epoch
-			models: selectedModels
+			models: selectedModels,
+			...(voiceControl ? { meta: { voice_control: voiceControl } } : {})
 		};
 
 		// Add message to history and Set currentId to messageId
@@ -2882,7 +2894,6 @@
 				await chatTitle.set(createdChat?.chat?.title ?? createdChat?.title ?? $i18n.t('Chat'));
 
 				params = structuredClone(createdChat?.chat?.params ?? {});
-				delete params.note_id;
 				chatFiles = mergeFiles(chatFiles, createdChat?.chat?.files ?? []);
 				await onSelectEmbeddedChat?.(_chatId);
 			} else if ($temporaryChatEnabled) {
@@ -3024,7 +3035,7 @@
 		files.push(
 			...(userMessage?.files ?? []).filter(
 				(item) =>
-					['doc', 'text', 'note', 'chat', 'collection', 'folder'].includes(item.type) ||
+					['doc', 'text', 'chat', 'collection', 'folder'].includes(item.type) ||
 					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
 			)
 		);
@@ -3803,22 +3814,18 @@
 			{#if !embedded && $selectedFolder && $selectedFolder?.meta?.background_image_url}
 				<div
 					class="absolute top-0 left-0 w-full h-full bg-cover bg-center bg-no-repeat"
-					style="background-image: url({$selectedFolder?.meta?.background_image_url})  "
-				/>
+					style="background-image: url({$selectedFolder?.meta?.background_image_url})  "></div>
 
 				<div
-					class="absolute top-0 left-0 w-full h-full bg-linear-to-t from-white to-white/85 dark:from-gray-900 dark:to-gray-900/90 z-0"
-				/>
+					class="absolute top-0 left-0 w-full h-full bg-linear-to-t from-white to-white/85 dark:from-gray-900 dark:to-gray-900/90 z-0"></div>
 			{:else if !embedded && ($settings?.backgroundImageUrl ?? $config?.license_metadata?.background_image_url ?? null)}
 				<div
 					class="absolute top-0 left-0 w-full h-full bg-cover bg-center bg-no-repeat"
 					style="background-image: url({$settings?.backgroundImageUrl ??
-						$config?.license_metadata?.background_image_url})  "
-				/>
+						$config?.license_metadata?.background_image_url})  "></div>
 
 				<div
-					class="absolute top-0 left-0 w-full h-full bg-linear-to-t from-white to-white/85 dark:from-gray-900 dark:to-gray-900/90 z-0"
-				/>
+					class="absolute top-0 left-0 w-full h-full bg-linear-to-t from-white to-white/85 dark:from-gray-900 dark:to-gray-900/90 z-0"></div>
 			{/if}
 
 			<PaneGroup direction="horizontal" class="w-full h-full">
@@ -3954,7 +3961,6 @@
 										topPadding={!embedded}
 										bottomPadding={files.length > 0}
 										{onSelect}
-										{onInsertToNote}
 									/>
 								</div>
 							</div>

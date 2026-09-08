@@ -6,13 +6,11 @@ Follows the utils/<feature>.py pattern (cf. utils/channels.py, utils/task.py).
 
 The scheduler_worker_loop handles all time-based background work:
   - Automation execution (claim_due → execute)
-  - Calendar event alerts (upcoming events → socket + webhook notifications)
   - One-shot chat timers
 
 Environment:
     SCHEDULER_POLL_INTERVAL             – seconds between polls (default: 10)
     TIMER_POLL_INTERVAL                 – seconds between timer polls (default: 1)
-    CALENDAR_ALERT_LOOKAHEAD_MINUTES   – default alert window (default: 5)
 """
 
 import asyncio
@@ -47,7 +45,6 @@ log = logging.getLogger(__name__)
 
 SCHEDULER_POLL_INTERVAL = int(os.getenv('SCHEDULER_POLL_INTERVAL', os.getenv('AUTOMATION_POLL_INTERVAL', '10')))
 TIMER_POLL_INTERVAL = int(os.getenv('TIMER_POLL_INTERVAL', '1'))
-CALENDAR_ALERT_LOOKAHEAD_MINUTES = int(os.getenv('CALENDAR_ALERT_LOOKAHEAD_MINUTES', '10'))
 
 
 ####################
@@ -205,7 +202,6 @@ async def scheduler_worker_loop(app) -> None:
 
     Handles:
       1. Automation execution  (ENABLE_AUTOMATIONS)
-      2. Calendar event alerts (ENABLE_CALENDAR)
 
     Runs on every instance. Poll interval is configurable via
     SCHEDULER_POLL_INTERVAL env var (default: 10 seconds).
@@ -231,7 +227,7 @@ async def scheduler_worker_loop(app) -> None:
             if now < next_scheduler_poll:
                 await asyncio.sleep(max(1, TIMER_POLL_INTERVAL))
                 continue
-            # Jitter to spread automation/calendar load across instances; timers keep a tight poll.
+            # Jitter to spread automation load across instances; timers keep a tight poll.
             next_scheduler_poll = now + SCHEDULER_POLL_INTERVAL + random.uniform(0, 2)
 
             # ── Automations ──
@@ -245,13 +241,6 @@ async def scheduler_worker_loop(app) -> None:
                         asyncio.create_task(execute_automation(app, automation))
                 except Exception:
                     log.exception('Scheduler: automation error')
-
-            # ── Calendar Alerts ──
-            if await Config.get('calendar.enable'):
-                try:
-                    await _check_calendar_alerts(app)
-                except Exception:
-                    log.exception('Scheduler: calendar alert error')
 
         except Exception:
             log.exception('Scheduler worker error')
@@ -610,84 +599,6 @@ async def execute_automation(app, automation: AutomationModel) -> None:
 ####################
 
 
-async def _check_calendar_alerts(app) -> None:
-    """Check for upcoming calendar events and send alert notifications.
-
-    De-duplication is DB-backed via meta.alerted_at — survives restarts
-    and works across multiple instances.
-    """
-    from open_webui.models.calendar import CalendarEvents, CalendarEventUpdateForm
-    from open_webui.socket.main import sio
-
-    now_ns = int(time.time_ns())
-    default_lookahead_ns = CALENDAR_ALERT_LOOKAHEAD_MINUTES * 60 * 1_000_000_000
-    # Grace window covers one poll cycle + jitter so "At time of event"
-    # alerts (alert_minutes=0) are not missed.
-    grace_ns = (SCHEDULER_POLL_INTERVAL + 5) * 1_000_000_000
-
-    async with get_async_db() as db:
-        upcoming = await CalendarEvents.get_upcoming_events(now_ns, default_lookahead_ns, grace_ns=grace_ns, db=db)
-
-    if not upcoming:
-        return
-
-    for event, user_tz in upcoming:
-        # Skip if already alerted for this start time
-        if event.meta and event.meta.get('alerted_at'):
-            continue
-
-        # Compute minutes until event starts
-        minutes_until = max(0, int((event.start_at - now_ns) / (60 * 1_000_000_000)))
-
-        alert_data = {
-            'event_id': event.id,
-            'title': event.title,
-            'description': event.description or '',
-            'start_at': event.start_at,
-            'minutes_until': minutes_until,
-            'calendar_id': event.calendar_id,
-            'location': event.location or '',
-        }
-
-        await sio.emit(
-            'events',
-            {
-                'data': {
-                    'type': 'calendar:alert',
-                    'data': alert_data,
-                },
-            },
-            room=f'user:{event.user_id}',
-        )
-
-        # Mark as alerted in DB so it survives restarts / multi-instance
-        try:
-            await CalendarEvents.update_event_by_id(
-                event.id,
-                CalendarEventUpdateForm(meta={'alerted_at': now_ns}),
-            )
-        except Exception:
-            log.debug(f'Failed to mark event {event.id} as alerted', exc_info=True)
-
-        # Send target notification if user has one configured
-        try:
-            time_str = f'in {minutes_until} min' if minutes_until > 0 else 'now'
-            await publish_event(
-                app,
-                EVENTS.CALENDAR_ALERT,
-                subject_id=event.id,
-                subject_type='calendar.event',
-                source='scheduler',
-                data={
-                    **alert_data,
-                    'user_id': event.user_id,
-                    'starts_in': time_str,
-                    'message': f'{event.title}: starting {time_str}',
-                },
-                message=event.title,
-            )
-        except Exception:
-            log.debug(f'Failed to send notification for calendar alert {event.id}', exc_info=True)
 
 
 async def _record_run(

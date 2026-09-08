@@ -878,8 +878,7 @@
 								class="{textareaClass} resize-none scrollbar-hidden"
 								rows="6"
 								placeholder={`e.g. {"model": "my-modelfile", "from": "ollama:7b"})`}
-								disabled={createModelLoading}
-							/>
+								disabled={createModelLoading}></textarea>
 						</div>
 
 						<div class="flex self-start">
@@ -1083,8 +1082,7 @@
 									<textarea
 										bind:value={modelFileContent}
 										class="{textareaClass} resize-none"
-										rows="6"
-									/>
+										rows="6"></textarea>
 								</div>
 							</div>
 						{/if}

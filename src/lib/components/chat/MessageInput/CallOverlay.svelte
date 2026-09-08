@@ -8,6 +8,7 @@
 	import { generateEmoji } from '$lib/apis';
 	import { synthesizeOpenAISpeech, transcribeAudio } from '$lib/apis/audio';
 	import { getOrInitKokoroWorker, resolveKokoroVoiceId } from '$lib/utils/kokoro';
+	import { isVoiceExitCommand, VOICE_EXIT_ACKNOWLEDGEMENT } from '$lib/utils/tts';
 
 	import { toast } from 'svelte-sonner';
 
@@ -37,6 +38,7 @@
 	let ttsPlaying = false;
 	let playbackLevels = Array(5).fill(0.1);
 	let muted = false;
+	let exitAfterPlayback = false;
 
 	let emoji = null;
 	let camera = false;
@@ -189,9 +191,39 @@
 		if (res) {
 			console.log(res.text);
 
-			if (res.text !== '') {
-				const _responses = await submitPrompt(res.text, { _raw: true });
-				console.log(_responses);
+				if (res.text !== '') {
+					const exiting = isVoiceExitCommand(res.text);
+					if (exiting) {
+						muted = true;
+						hasStartedSpeaking = false;
+						confirmed = false;
+						audioChunks = [];
+						audioPreRollChunks = [];
+						assistantSpeaking = true;
+						loading = false;
+
+						// Exit is a client control command, not a model prompt. Speak a fixed
+						// acknowledgement, wait for it to finish, and then close Voice Mode.
+						const exitMessageId = `voice-control-exit-${Date.now()}`;
+						audioAbortController?.abort();
+						audioAbortController = new AbortController();
+						playbackQueues[exitMessageId] = Promise.resolve(true);
+						try {
+							await enqueueAudio(
+								exitMessageId,
+								VOICE_EXIT_ACKNOWLEDGEMENT,
+								audioAbortController.signal
+							);
+						} finally {
+							delete playbackQueues[exitMessageId];
+							assistantSpeaking = false;
+							$showCallOverlay = false;
+						}
+						return;
+					}
+
+					const _responses = await submitPrompt(res.text, []);
+					console.log(_responses);
 			}
 		}
 	};
@@ -306,6 +338,7 @@
 	};
 
 	const restoreListeningState = async (): Promise<void> => {
+		if (exitAfterPlayback) return;
 		assistantSpeaking = false;
 		loading = false;
 		confirmed = false;
@@ -748,7 +781,7 @@
 
 	let playbackQueues: Record<string, Promise<boolean>> = {};
 
-	const enqueueAudio = (id: string, content: string, signal: AbortSignal) => {
+	const enqueueAudio = (id: string, content: string, signal: AbortSignal): Promise<boolean> => {
 		const receivedAt = performance.now();
 		const traceId = `${id.slice(0, 8)}-${++ttsSequence}`;
 		console.info(`[Voice TTS ${traceId}] sentence received (${content.length} characters)`);
@@ -782,6 +815,7 @@
 			);
 			return played;
 		});
+		return playbackQueues[id];
 	};
 
 	const chatStartHandler = async (e) => {
@@ -829,7 +863,12 @@
 		delete playbackQueues[id];
 		if (currentMessageId === id && !audioAbortController.signal.aborted) {
 			if (!completed) console.error(`TTS playback failed for message ID ${id}`);
-			await restoreListeningState();
+			if (exitAfterPlayback) {
+				exitAfterPlayback = false;
+				$showCallOverlay = false;
+			} else {
+				await restoreListeningState();
+			}
 		}
 	};
 
@@ -1030,7 +1069,7 @@
 									? 'size-14'
 									: 'size-12'}  transition-all rounded-full bg-cover bg-center bg-no-repeat"
 						style={`background-image: url('${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}&voice=true');`}
-					/>
+					></div>
 				{/if}
 				<!-- navbar -->
 			</button>
@@ -1108,7 +1147,7 @@
 										? 'size-44'
 										: 'size-40'} transition-all rounded-full bg-cover bg-center bg-no-repeat"
 							style={`background-image: url('${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}&voice=true');`}
-						/>
+						></div>
 					{/if}
 				</button>
 			{:else}
@@ -1118,10 +1157,9 @@
 						id="camera-feed"
 						autoplay
 						class="rounded-2xl h-full min-w-full object-cover object-center"
-						playsinline
-					/>
+						playsinline></video>
 
-					<canvas id="camera-canvas" style="display:none;" />
+					<canvas id="camera-canvas" style="display:none;"></canvas>
 
 					<div class=" absolute top-4 md:top-8 left-4">
 						<button

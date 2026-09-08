@@ -1,6 +1,8 @@
 <script context="module">
+	import { writable } from 'svelte/store';
+
 	// Persists across mount/unmount cycles (module-level, not per-instance)
-	let savedPath = '/';
+	const savedPath = writable('/');
 </script>
 
 <script lang="ts">
@@ -49,6 +51,7 @@
 
 	const i18n = getContext('i18n');
 
+	// svelte-ignore export_let_unused\n
 	export let onAttach: ((blob: Blob, name: string, contentType: string) => void) | null = null;
 	export let overlay = false;
 	export let chatId: string | null = null;
@@ -89,7 +92,7 @@
 	};
 
 	// ── Directory state ──────────────────────────────────────────────────
-	let currentPath = savedPath;
+	let currentPath = $savedPath;
 	let fileRoot: TerminalFileRoot | null = null;
 	let entries: FileEntry[] = [];
 	let loading = false;
@@ -270,7 +273,7 @@
 			if (chatChanged && chatId && !oldChatId) {
 				// Chat just got created (null → real ID): persist the current
 				// browsed path as the new session's cwd — don't re-fetch.
-				setCwd(terminal.url, terminal.key, savedPath, chatId);
+				setCwd(terminal.url, terminal.key, $savedPath, chatId);
 			} else if (terminalChanged || chatChanged) {
 				// Terminal switched, new chat started, or switched between
 				// existing chats — re-fetch the session cwd.
@@ -283,8 +286,8 @@
 						terminalEnabled = config?.features?.terminal !== false;
 					}
 
-					savedPath = applyCwd(await getCwd(terminal.url, terminal.key, chatId ?? undefined));
-					loadDir(savedPath);
+					$savedPath = applyCwd(await getCwd(terminal.url, terminal.key, chatId ?? undefined));
+					loadDir($savedPath);
 				})();
 			}
 		}
@@ -402,7 +405,7 @@
 		clearFilePreview();
 		clearSelection();
 		currentPath = directory;
-		savedPath = directory;
+		$savedPath = directory;
 		pushNavHistory(directory);
 
 		const result = await listFiles(terminal.url, terminal.key, directory, chatId ?? undefined);
@@ -909,12 +912,12 @@
 				const config = await getTerminalConfig(terminal.url, terminal.key);
 				terminalEnabled = config?.features?.terminal !== false;
 
-				if (chatId || savedPath === '/') {
+				if (chatId || $savedPath === '/') {
 					// Fetch session-specific cwd from the server (or global default for new chats)
-					savedPath = applyCwd(await getCwd(terminal.url, terminal.key, chatId ?? undefined));
+					$savedPath = applyCwd(await getCwd(terminal.url, terminal.key, chatId ?? undefined));
 				}
-				savedPath = clampToFileRoot(savedPath);
-				loadDir(savedPath);
+				$savedPath = clampToFileRoot($savedPath);
+				loadDir($savedPath);
 			})();
 		}
 
@@ -1322,9 +1325,6 @@
 		<!-- Content -->
 		<div
 			class="flex-1 overflow-y-auto min-h-0 min-w-0"
-			on:click={(e) => {
-				if (e.target === e.currentTarget && selectedCount > 0) clearSelection();
-			}}
 		>
 			{#if previewPort !== null}
 				<PortPreview
@@ -1494,9 +1494,8 @@
 					<!-- svelte-ignore a11y-no-static-element-interactions -->
 					<div class="relative cursor-row-resize group" on:mousedown={onHandleMouseDown}>
 						<div
-							class="h-px bg-transparent group-hover:bg-black/10 dark:group-hover:bg-white/10 transition"
-						/>
-						<div class="absolute inset-x-0 -top-1.5 -bottom-1.5" />
+							class="h-px bg-transparent group-hover:bg-black/10 dark:group-hover:bg-white/10 transition"></div>
+						<div class="absolute inset-x-0 -top-1.5 -bottom-1.5"></div>
 					</div>
 				{/if}
 
@@ -1525,8 +1524,7 @@
 								? 'bg-emerald-500'
 								: terminalConnecting
 									? 'bg-yellow-500 animate-pulse'
-									: 'bg-gray-400'}"
-						/>
+									: 'bg-gray-400'}"></div>
 					{/if}
 
 					<svg

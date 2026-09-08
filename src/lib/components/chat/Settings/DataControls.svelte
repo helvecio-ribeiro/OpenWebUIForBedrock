@@ -18,6 +18,7 @@
 
 	const i18n = getContext('i18n');
 
+	// svelte-ignore export_let_unused\n
 	export let saveSettings: Function;
 
 	// Chats

@@ -1,8 +1,5 @@
 <script lang="ts">
-	import dayjs from 'dayjs';
-
 	import { onMount, onDestroy, getContext, createEventDispatcher } from 'svelte';
-	import { searchNotes } from '$lib/apis/notes';
 	import { searchKnowledgeBases, searchKnowledgeFiles } from '$lib/apis/knowledge';
 
 	import { decodeString } from '$lib/utils';
@@ -13,7 +10,6 @@
 	import Database from '$lib/components/icons/Database.svelte';
 	import ChevronDown from '$lib/components/icons/ChevronDown.svelte';
 	import ChevronRight from '$lib/components/icons/ChevronRight.svelte';
-	import PageEdit from '$lib/components/icons/PageEdit.svelte';
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 
 	const i18n = getContext('i18n');
@@ -26,13 +22,12 @@
 	let query = '';
 	let searchDebounceTimer: ReturnType<typeof setTimeout>;
 
-	let noteItems = [];
 	let knowledgeItems = [];
 	let fileItems = [];
 
 	let items = [];
 
-	$: items = [...noteItems, ...knowledgeItems, ...fileItems];
+	$: items = [...knowledgeItems, ...fileItems];
 
 	const handleSearchInput = () => {
 		clearTimeout(searchDebounceTimer);
@@ -46,26 +41,8 @@
 	});
 
 	const getItems = () => {
-		getNoteItems();
 		getKnowledgeItems();
 		getKnowledgeFileItems();
-	};
-
-	const getNoteItems = async () => {
-		const res = await searchNotes(localStorage.token, query).catch(() => {
-			return null;
-		});
-
-		if (res) {
-			noteItems = res.items.map((note) => {
-				return {
-					...note,
-					type: 'note',
-					name: note.title,
-					description: dayjs(note.updated_at / 1000000).fromNow()
-				};
-			});
-		}
 	};
 
 	const getKnowledgeItems = async () => {
@@ -74,9 +51,9 @@
 		});
 
 		if (res) {
-			knowledgeItems = res.items.map((note) => {
+			knowledgeItems = res.items.map((knowledge) => {
 				return {
-					...note,
+					...knowledge,
 					type: 'collection'
 				};
 			});
@@ -144,9 +121,7 @@
 					{#each items as item, i}
 						{#if i === 0 || item?.type !== items[i - 1]?.type}
 							<div class="px-1.5 text-[11px] text-gray-500 py-0.5">
-								{#if item?.type === 'note'}
-									{$i18n.t('Notes')}
-								{:else if item?.type === 'collection'}
+								{#if item?.type === 'collection'}
 									{$i18n.t('Collections')}
 								{:else if item?.type === 'file'}
 									{$i18n.t('Files')}
@@ -166,15 +141,7 @@
 								}}
 							>
 								<div class="  text-black dark:text-gray-100 flex items-center gap-1 shrink-0">
-									{#if item.type === 'note'}
-										<Tooltip
-											content={$i18n.t('Note')}
-											placement="top"
-											tippyOptions={{ zIndex: 100000 }}
-										>
-											<PageEdit className="size-3.5" />
-										</Tooltip>
-									{:else if item.type === 'collection'}
+									{#if item.type === 'collection'}
 										<Tooltip
 											content={$i18n.t('Collection')}
 											placement="top"

@@ -246,8 +246,7 @@
 	{#if viewMode === 'json'}
 		<div
 			bind:this={cmContainer}
-			class="w-full rounded-2xl overflow-hidden border border-gray-100 dark:border-gray-800"
-		/>
+			class="w-full rounded-2xl overflow-hidden border border-gray-100 dark:border-gray-800"></div>
 		{#if jsonError}
 			<div class="text-xs text-red-500 mt-1.5 px-1">{jsonError}</div>
 		{/if}
@@ -278,7 +277,7 @@
 								}}
 								placeholder={$i18n.t('Message text...')}
 								rows="1"
-							/>
+							></textarea>
 						{:else if di.type === 'reasoning'}
 							<textarea
 								use:fitContent
@@ -290,7 +289,7 @@
 								}}
 								placeholder={$i18n.t('Reasoning text...')}
 								rows="1"
-							/>
+							></textarea>
 						{:else if di.type === 'function_call'}
 							<div class="text-[0.9375rem] p-1.5 text-gray-500 dark:text-gray-400">
 								{#if di.item.arguments}

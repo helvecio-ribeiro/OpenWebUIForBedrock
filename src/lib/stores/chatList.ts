@@ -8,9 +8,22 @@ type ChatListItem = {
 
 const chatsStore = writable<ChatListItem[] | null>(null);
 const pinnedChatsStore = writable<ChatListItem[]>([]);
+export const chatSelectionMode = writable(false);
+export const selectedChatIds = writable<string[]>([]);
 
 export const chats = readonly(chatsStore);
 export const pinnedChats = readonly(pinnedChatsStore);
+
+export const toggleChatSelection = (chatId: string) => {
+	selectedChatIds.update((ids) => {
+		return ids.includes(chatId) ? ids.filter((id) => id !== chatId) : [...ids, chatId];
+	});
+};
+
+export const resetChatSelection = () => {
+	chatSelectionMode.set(false);
+	selectedChatIds.set([]);
+};
 
 let currentPage = 1;
 let paginationReady = false;

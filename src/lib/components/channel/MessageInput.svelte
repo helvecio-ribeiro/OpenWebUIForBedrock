@@ -44,6 +44,7 @@
 	export let placeholder = $i18n.t('Type here...');
 	export let chatInputElement;
 
+	// svelte-ignore export_let_unused\n
 	export let id = null;
 	export let channel = null;
 
@@ -59,7 +60,7 @@
 
 	export let disabled = false;
 	export let acceptFiles = true;
-	export let showFormattingToolbar = true;
+	// svelte-ignore export_let_unused\n	export let showFormattingToolbar = true;
 
 	export let userSuggestions = false;
 	export let channelSuggestions = false;

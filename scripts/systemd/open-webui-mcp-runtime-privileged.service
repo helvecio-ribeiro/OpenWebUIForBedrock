@@ -1,0 +1,22 @@
+[Unit]
+Description=Open WebUI privileged managed MCP runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/open-webui
+EnvironmentFile=/etc/open-webui/mcp-runtime.env
+Environment=PYTHONPATH=/opt/open-webui/backend
+Environment=MANAGED_MCP_ALLOW_ROOT_RUNTIME=true
+ExecStart=/opt/open-webui/backend/venv/bin/python -m open_webui.mcp_runtime.app
+Restart=on-failure
+RestartSec=3
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/open-webui/managed-mcp
+
+[Install]
+WantedBy=multi-user.target

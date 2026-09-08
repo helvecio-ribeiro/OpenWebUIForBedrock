@@ -8,6 +8,8 @@
 	import { toast } from 'svelte-sonner';
 	import { deleteChatMessageById, updateChatById } from '$lib/apis/chats';
 	import { copyToClipboard, extractCurlyBraceWords } from '$lib/utils';
+	import { getSpeechText } from '$lib/utils/tts';
+	import { getOutputText } from './Messages/structuredOutput';
 
 	import Message from './Messages/Message.svelte';
 	import Loader from '../common/Loader.svelte';
@@ -22,6 +24,7 @@
 	export let chatId = '';
 	export let user = $_user;
 
+	// svelte-ignore export_let_unused\n
 	export let prompt;
 	export let history = {};
 	export let selectedModels;
@@ -37,7 +40,7 @@
 	export let mergeResponses: Function;
 
 	export let chatActionHandler: Function;
-	export let showMessage: Function = () => {};
+	// svelte-ignore export_let_unused\n	export let showMessage: Function = () => {};
 	export let submitMessage: Function = () => {};
 	export let addMessages: Function = () => {};
 	export let forkHandler: Function | null = null;
@@ -53,7 +56,6 @@
 	export let messagesContainerId = 'messages-container';
 
 	export let onSelect = (e) => {};
-	export let onInsertToNote: ((content: string) => void) | null = null;
 
 	export let messagesCount: number | null = 8;
 	let messagesLoading = false;
@@ -400,6 +402,9 @@
 					files: undefined,
 					content: output !== undefined ? '' : content,
 					...(output !== undefined ? { output } : {}),
+					speechContent: getSpeechText(
+						output !== undefined ? getOutputText(output) : (content ?? '')
+					),
 					timestamp: Math.floor(Date.now() / 1000) // Unix epoch
 				};
 
@@ -420,10 +425,12 @@
 				if (content !== undefined) {
 					history.messages[messageId].originalContent = history.messages[messageId].content;
 					history.messages[messageId].content = content;
+					history.messages[messageId].speechContent = getSpeechText(content);
 				}
 				if (output !== undefined) {
 					history.messages[messageId].output = output;
 					history.messages[messageId].content = '';
+					history.messages[messageId].speechContent = getSpeechText(getOutputText(output));
 				}
 				await updateChat();
 			}
@@ -562,14 +569,13 @@
 								{compactPreview}
 								{editCodeBlock}
 								{topPadding}
-								{onInsertToNote}
 							/>
 						{/each}
 					</ul>
 				</section>
-				<div class="pb-18" />
+				<div class="pb-18"></div>
 				{#if bottomPadding}
-					<div class="  pb-6" />
+					<div class="  pb-6"></div>
 				{/if}
 			{/key}
 		</div>

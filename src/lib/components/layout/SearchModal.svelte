@@ -29,7 +29,6 @@
 	import Messages from '../chat/Messages.svelte';
 	import { goto } from '$app/navigation';
 	import EditPencilIcon from './Sidebar/icons/EditPencil.svelte';
-	import NotesIcon from './Sidebar/icons/Notes.svelte';
 
 	import ChatMenu from './Sidebar/ChatMenu.svelte';
 	import ShareChatModal from '../chat/ShareChatModal.svelte';
@@ -514,24 +513,6 @@
 	};
 
 	onMount(() => {
-		actions = [
-			...actions,
-			...(($config?.features?.enable_notes ?? false) &&
-			($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
-				? [
-						{
-							label: $i18n.t('Create a new note'),
-							onClick: async () => {
-								await goto(`/notes?content=${query}`);
-								show = false;
-								onClose();
-							},
-							icon: NotesIcon
-						}
-					]
-				: [])
-		];
-
 		document.addEventListener('keydown', onKeyDown);
 		document.addEventListener('keydown', onShiftKeyDown);
 		document.addEventListener('keyup', onShiftKeyUp);
@@ -631,7 +612,7 @@
 				{/each}
 
 				{#if chatList}
-					<div aria-hidden="true" class="h-px my-3" />
+					<div aria-hidden="true" class="h-px my-3"></div>
 
 					{#if chatList.length === 0}
 						<div class="text-xs text-gray-500 dark:text-gray-400 text-center px-5 py-4">

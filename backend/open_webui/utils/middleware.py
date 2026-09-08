@@ -44,7 +44,6 @@ from open_webui.models.chats import Chats
 from open_webui.models.config import Config
 from open_webui.models.folders import Folders
 from open_webui.models.models import Models
-from open_webui.models.notes import Notes
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.users import UserModel, Users
 from open_webui.events import EVENTS, publish_event
@@ -138,8 +137,36 @@ from open_webui.utils.tools import (
 )
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
+VOICE_CONTROL_SYSTEM_PROMPTS = {
+    'exit': (
+        'The latest user message is a Voice Mode control command that ends the session. '
+        'Reply with exactly "Goodbye." Do not apologize, explain, mention controls, ask a '
+        'question, call a tool, or add any other text.'
+    )
+}
+
+
+def get_voice_control_system_prompt(metadata: dict) -> str | None:
+    user_message = metadata.get('user_message') or {}
+    meta = user_message.get('meta') or {}
+    return VOICE_CONTROL_SYSTEM_PROMPTS.get(meta.get('voice_control'))
+
+
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
+
+
+def append_streaming_tool_arguments(tool_call: dict, arguments: Any) -> None:
+    """Append one streamed function-argument fragment without dropping string deltas."""
+    if arguments is None:
+        return
+    if not isinstance(arguments, str):
+        arguments = json.dumps(arguments)
+    function = tool_call.setdefault('function', {})
+    current = function.get('arguments')
+    if not isinstance(current, str):
+        current = ''
+    function['arguments'] = current + arguments
 
 
 async def publish_chat_finished_event(
@@ -395,17 +422,15 @@ def get_citation_source_from_tool_result(
             for chunk in chunks:
                 source_name = chunk.get('source', 'Unknown')
                 file_id = chunk.get('file_id', '')
-                note_id = chunk.get('note_id', '')
                 chunk_type = chunk.get('type', 'file')
                 content = chunk.get('content', '')
 
-                # Use file_id or note_id as the key
-                key = file_id or note_id or source_name
+                key = file_id or source_name
 
                 if key not in sources_by_file:
                     sources_by_file[key] = {
                         'source': {
-                            'id': file_id or note_id,
+                            'id': file_id,
                             'name': source_name,
                             'type': chunk_type,
                         },
@@ -419,7 +444,6 @@ def get_citation_source_from_tool_result(
                         'file_id': file_id,
                         'name': source_name,
                         'source': source_name,
-                        **({'note_id': note_id} if note_id else {}),
                     }
                 )
 
@@ -1955,7 +1979,6 @@ def apply_params_to_form_data(form_data, model):
         'reasoning_tags': list,
         'compact_token_threshold': int,
         'system': str,
-        'note_id': str,
     }
 
     for key in list(params.keys()):
@@ -2210,6 +2233,20 @@ async def connect_mcp_server(
         if server_connection.get('type', '') == 'mcp' and (server_connection.get('info') or {}).get('id') == server_id:
             mcp_server_connection = server_connection
             break
+
+    if not mcp_server_connection:
+        from open_webui.utils.mcp.runtime_client import (
+            ManagedMCPRuntimeError,
+            managed_mcp_runtime,
+        )
+
+        try:
+            for server_connection in await managed_mcp_runtime.connections():
+                if (server_connection.get('info') or {}).get('id') == server_id:
+                    mcp_server_connection = server_connection
+                    break
+        except ManagedMCPRuntimeError as exc:
+            log.warning('Managed MCP runtime unavailable: %s', exc)
 
     if not mcp_server_connection:
         log.error(f'MCP server with id {server_id} not found')
@@ -2539,6 +2576,14 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     form_data['messages'],
                 )
 
+            voice_control_prompt = get_voice_control_system_prompt(metadata)
+            if voice_control_prompt:
+                form_data['messages'] = add_or_update_system_message(
+                    voice_control_prompt,
+                    form_data['messages'],
+                    append=True,
+                )
+
         if 'memory' in features and features['memory'] and await Config.get('memories.system_context.enable'):
             form_data = await add_memory_context(request, form_data, user, model)
 
@@ -2617,32 +2662,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     if is_saved_chat_id(metadata.get('chat_id')):
         chat = await Chats.get_chat_by_id(metadata['chat_id'])
 
-    if chat and (chat.meta or {}).get('internal') is True and (chat.meta or {}).get('type') == 'note':
-        note_id = (chat.meta or {}).get('note_id')
-        note = await Notes.get_note_by_id(note_id) if note_id else None
-        if note and (
-            user.role == 'admin'
-            or note.user_id == user.id
-            or await AccessGrants.has_access(
-                user_id=user.id,
-                resource_type='note',
-                resource_id=note.id,
-                permission='read',
-            )
-        ):
-            note_files = [
-                file
-                for file in ((note.data or {}).get('files') or [])
-                if isinstance(file, dict)
-                and file.get('type') != 'image'
-                and not (file.get('content_type') or '').startswith('image/')
-            ]
-            if note_files:
-                files = [*(files or []), *note_files]
-
     use_builtin_tools = (
-        chat and (chat.meta or {}).get('internal') is True and (chat.meta or {}).get('type') == 'note'
-    ) or (
         bool(metadata.get('session_id'))
         and metadata.get('params', {}).get('function_calling') != 'legacy'
         and (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get('builtin_tools', True)
@@ -4485,16 +4505,9 @@ async def streaming_chat_response_handler(response, ctx):
                                                         current_response_tool_call['function']['name'] = delta_name
 
                                                     if delta_arguments is not None:
-                                                        if not isinstance(delta_arguments, str):
-                                                            delta_arguments = json.dumps(delta_arguments)
-                                                        current_response_tool_call.setdefault('function', {})
-                                                        if not isinstance(
-                                                            current_response_tool_call['function'].get('arguments'),
-                                                            str,
-                                                        ):
-                                                            current_response_tool_call['function']['arguments'] = ''
-                                                        current_response_tool_call['function']['arguments'] += (
-                                                            delta_arguments
+                                                        append_streaming_tool_arguments(
+                                                            current_response_tool_call,
+                                                            delta_arguments,
                                                         )
 
                                         # Emit pending tool calls in real-time

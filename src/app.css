@@ -692,35 +692,6 @@ html.high-contrast.dark .ProseMirror p.is-editor-empty:first-child::before {
 	@apply bg-transparent p-0 m-0;
 }
 
-/* this is a rough fix for the first cursor position when the first paragraph is empty */
-.ProseMirror > .ProseMirror-yjs-cursor:first-child {
-	margin-top: 16px;
-}
-/* This gives the remote user caret. The colors are automatically overwritten*/
-.ProseMirror-yjs-cursor {
-	position: relative;
-	margin-left: -1px;
-	margin-right: -1px;
-	border-left: 1px solid black;
-	border-right: 1px solid black;
-	border-color: orange;
-	word-break: normal;
-	pointer-events: none;
-}
-/* This renders the username above the caret */
-.ProseMirror-yjs-cursor > div {
-	position: absolute;
-	top: -1.05em;
-	left: -1px;
-	font-size: 13px;
-	background-color: rgb(250, 129, 0);
-	user-select: none;
-	color: white;
-	padding-left: 2px;
-	padding-right: 2px;
-	white-space: nowrap;
-}
-
 body {
 	background: #fff;
 	color: #000;
@@ -838,10 +809,6 @@ body {
 .pm-li-drop-outdent {
 	position: relative;
 	z-index: 0;
-}
-
-#note-content-container .ProseMirror {
-	padding-bottom: 2rem; /* space for the bottom toolbar */
 }
 
 /* High Contrast Mode: placeholders bottom out at 1.58:1 (WCAG 1.4.3 wants 4.5:1). */

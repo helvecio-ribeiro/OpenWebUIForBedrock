@@ -23,7 +23,7 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	export let groupId: string;
-	export let userCount = 0;
+	// svelte-ignore export_let_unused\n	export let userCount = 0;
 
 	let users = null;
 	let total = null;
