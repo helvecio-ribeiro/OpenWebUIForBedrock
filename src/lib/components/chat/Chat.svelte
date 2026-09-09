@@ -20,6 +20,7 @@
 		config,
 		type Model,
 		models,
+		activeChatModelIds,
 		tags as allTags,
 		settings,
 		showSidebar,
@@ -165,6 +166,13 @@
 	let eventCallback = null;
 
 	let selectedModels = [''];
+	$: if (selectedModels.some((modelId) => modelId)) {
+		const activeModels = selectedModels.filter((modelId) => modelId);
+		activeChatModelIds.set(activeModels);
+		if (typeof sessionStorage !== 'undefined') {
+			sessionStorage.activeChatModelIds = JSON.stringify(activeModels);
+		}
+	}
 	let atSelectedModel: Model | undefined;
 	let selectedModelIds = [];
 	$: if (atSelectedModel !== undefined) {

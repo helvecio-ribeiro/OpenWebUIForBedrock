@@ -519,9 +519,10 @@ export const formatMessageTimestampFull = (inputDate) =>
 		minute: '2-digit'
 	}) ?? '';
 
-export const copyToClipboard = async (text, html = null, formatted = false) => {
+export const copyToClipboard = async (text, html = null, formatted = false, htmlPrefix = '') => {
 	if (formatted) {
 		let styledHtml = '';
+		let plainText = text;
 		if (!html) {
 			const options = {
 				throwOnError: false,
@@ -535,79 +536,116 @@ export const copyToClipboard = async (text, html = null, formatted = false) => {
 			// DEVELOPER NOTE: Go to `$lib/components/chat/Messages/Markdown.svelte` to add extra markdown extensions for rendering.
 
 			const htmlContent = marked.parse(text);
+			const richTextContainer = document.createElement('div');
+			richTextContainer.innerHTML = DOMPurify.sanitize(`${htmlContent}`);
+			const setInlineStyle = (selector, style) =>
+				richTextContainer
+					.querySelectorAll(selector)
+					.forEach((element) => element.setAttribute('style', style));
 
-			// Add basic styling to make the content look better when pasted
-			styledHtml = `
-			<div>
-				<style>
-					pre {
-						background-color: #f6f8fa;
-						border-radius: 6px;
-						padding: 16px;
-						overflow: auto;
-					}
-					code {
-						font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-						font-size: 14px;
-					}
-					.hljs-keyword { color: #d73a49; }
-					.hljs-string { color: #032f62; }
-					.hljs-comment { color: #6a737d; }
-					.hljs-function { color: #6f42c1; }
-					.hljs-number { color: #005cc5; }
-					.hljs-operator { color: #d73a49; }
-					.hljs-class { color: #6f42c1; }
-					.hljs-title { color: #6f42c1; }
-					.hljs-params { color: #24292e; }
-					.hljs-built_in { color: #005cc5; }
-					blockquote {
-						border-left: 4px solid #dfe2e5;
-						padding-left: 16px;
-						color: #6a737d;
-						margin-left: 0;
-						margin-right: 0;
-					}
-					table {
-						border-collapse: collapse;
-						width: 100%;
-						margin-bottom: 16px;
-					}
-					table, th, td {
-						border: 1px solid #dfe2e5;
-					}
-					th, td {
-						padding: 8px 12px;
-					}
-					th {
-						background-color: #f6f8fa;
-					}
-				</style>
-				${htmlContent}
-			</div>
-		`;
+			// Outlook and Word may expose embedded <style> contents as visible text.
+			// Keep the clipboard fragment semantic and apply only conservative inline
+			// formatting that survives Office, webmail, and messaging editors.
+			setInlineStyle('p', 'margin: 0 0 12px 0; font-size: 14px; line-height: 1.7;');
+			setInlineStyle(
+				'h1',
+				'margin: 18px 0 10px; font-size: 24px; line-height: 1.3; font-weight: 700;'
+			);
+			setInlineStyle(
+				'h2',
+				'margin: 16px 0 8px; font-size: 20px; line-height: 1.35; font-weight: 700;'
+			);
+			setInlineStyle(
+				'h3',
+				'margin: 14px 0 8px; font-size: 17px; line-height: 1.4; font-weight: 700;'
+			);
+			setInlineStyle(
+				'h4, h5, h6',
+				'margin: 12px 0 6px; font-size: 14px; line-height: 1.5; font-weight: 700;'
+			);
+			setInlineStyle('strong, b', 'font-weight: 700;');
+			setInlineStyle('em, i', 'font-style: italic;');
+			setInlineStyle(
+				'ul',
+				'display: block; list-style-type: disc; margin: 8px 0 12px; padding-left: 28px;'
+			);
+			setInlineStyle(
+				'ol',
+				'display: block; list-style-type: decimal; margin: 8px 0 12px; padding-left: 28px;'
+			);
+			setInlineStyle(
+				'li',
+				'display: list-item; margin: 4px 0; padding-left: 2px; font-size: 14px; line-height: 1.7;'
+			);
+			setInlineStyle(
+				'blockquote',
+				'border-left: 3px solid #d1d5db; margin: 12px 0; padding: 4px 0 4px 12px; color: #4b5563; font-size: 14px; line-height: 1.7;'
+			);
+			setInlineStyle(
+				'pre',
+				'background: #f6f8fa; padding: 12px; white-space: pre-wrap; font-family: monospace; font-size: 13px; line-height: 1.5;'
+			);
+			setInlineStyle('code', 'font-family: monospace; font-size: 13px;');
+			setInlineStyle('table', 'border-collapse: collapse; width: 100%; margin: 0 0 12px;');
+			setInlineStyle('th, td', 'border: 1px solid #d1d5db; padding: 6px 8px; text-align: left;');
+			styledHtml = `<div style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; line-height: 1.7; color: #374151;">${richTextContainer.innerHTML}</div>`;
 		} else {
 			// If HTML is provided, use it directly
 			styledHtml = html;
 		}
 
-		// Create a blob with HTML content
-		const blob = new Blob([styledHtml], { type: 'text/html' });
-
-		try {
-			// Create a ClipboardItem with HTML content
-			const data = new ClipboardItem({
-				'text/html': blob,
-				'text/plain': new Blob([text], { type: 'text/plain' })
-			});
-
-			// Write to clipboard
-			await navigator.clipboard.write([data]);
-			return true;
-		} catch (err) {
-			console.error('Error copying formatted content:', err);
-			// Fallback to plain text
-			return await copyToClipboard(text);
+		if (htmlPrefix) {
+			styledHtml = `${htmlPrefix}${styledHtml}`;
 		}
+
+		// Rich-text targets consume text/html, while email, messaging, and other
+		// plain-text targets consume text/plain. Derive the latter from the rendered
+		// markup so Markdown control characters never leak into pasted content.
+		const plainTextContainer = document.createElement('div');
+		plainTextContainer.innerHTML = styledHtml;
+		plainText = plainTextContainer.innerText.trim() || text;
+
+		if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+			try {
+				const data = new ClipboardItem({
+					'text/html': new Blob([styledHtml], { type: 'text/html' }),
+					'text/plain': new Blob([plainText], { type: 'text/plain' })
+				});
+				await navigator.clipboard.write([data]);
+				return true;
+			} catch (err) {
+				console.warn('Rich Clipboard API unavailable; using compatibility copy path:', err);
+			}
+		}
+
+		// Safari versions without ClipboardItem use the synchronous copy-event path.
+		// It must run while the original click gesture is active, particularly when
+		// Share immediately transfers focus to an email or messaging application.
+		const copySurface = document.createElement('div');
+		copySurface.innerHTML = styledHtml;
+		copySurface.contentEditable = 'true';
+		copySurface.style.position = 'fixed';
+		copySurface.style.left = '-10000px';
+		copySurface.style.top = '0';
+		document.body.appendChild(copySurface);
+
+		const range = document.createRange();
+		range.selectNodeContents(copySurface);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+
+		let copied = false;
+		try {
+			// Do not synthesize clipboard MIME values here. Chromium on macOS may
+			// accept the event while silently retaining only text/plain. Copying the
+			// selected rendered DOM makes the browser serialize its native HTML flavor.
+			copied = document.execCommand('copy');
+		} finally {
+			selection?.removeAllRanges();
+			copySurface.remove();
+		}
+		return copied || (await copyToClipboard(plainText));
 	} else {
 		let result = false;
 		if (!navigator.clipboard) {

@@ -28,7 +28,6 @@ from open_webui.models.tools import (
 from open_webui.utils.access_control import (
     filter_allowed_access_grants,
     has_access,
-    has_permission,
 )
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.mcp.runtime_client import ManagedMCPRuntimeError, managed_mcp_runtime
@@ -331,20 +330,9 @@ async def load_tool_from_url(request: Request, form_data: LoadUrlForm, user=Depe
 @router.get('/export', response_model=list[ToolModel])
 async def export_tools(
     request: Request,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
-        user.id,
-        'workspace.tools_export',
-        await Config.get('user.permissions'),
-        db=db,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
-
     if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
         return await Tools.get_tools(db=db)
     else:
@@ -360,24 +348,10 @@ async def export_tools(
 async def create_new_tools(
     request: Request,
     form_data: ToolForm,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     """Create a new tool from user-supplied Python source code."""
-    if user.role != 'admin' and not (
-        await has_permission(user.id, 'workspace.tools', await Config.get('user.permissions'), db=db)
-        or await has_permission(
-            user.id,
-            'workspace.tools_import',
-            await Config.get('user.permissions'),
-            db=db,
-        )
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
-
     if not form_data.id.isidentifier():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -527,12 +501,9 @@ async def update_tools_by_id(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    # Content edits trigger exec on load — gate them behind workspace.tools (matches /create).
+    # Tool source executes when loaded, so only administrators may change it.
     if form_data.content != tools.content:
-        if user.role != 'admin' and not (
-            await has_permission(user.id, 'workspace.tools', await Config.get('user.permissions'), db=db)
-            or await has_permission(user.id, 'workspace.tools_import', await Config.get('user.permissions'), db=db)
-        ):
+        if user.role != 'admin':
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=ERROR_MESSAGES.UNAUTHORIZED,

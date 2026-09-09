@@ -37,7 +37,7 @@ from open_webui.models.models import (
     ModelResponse,
     Models,
 )
-from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
+from open_webui.utils.access_control import filter_allowed_access_grants
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.chat_variables import get_chat_variables_schema
@@ -250,17 +250,10 @@ async def get_model_tags(user=Depends(get_verified_user), db: AsyncSession = Dep
 async def create_new_model(
     request: Request,
     form_data: ModelForm,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """Create a new workspace model entry."""
-    if user.role != 'admin' and not await has_permission(
-        user.id, 'workspace.models', await Config.get('user.permissions'), db=db
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
+    """Create an administrator-managed model entry."""
 
     model = await Models.get_model_by_id(form_data.id, db=db)
     if model:
@@ -315,20 +308,9 @@ async def create_new_model(
 @router.get('/export', response_model=list[ModelModel])
 async def export_models(
     request: Request,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
-        user.id,
-        'workspace.models_export',
-        await Config.get('user.permissions'),
-        db=db,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
-
     if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
         return await Models.get_models(db=db)
     else:
@@ -347,20 +329,10 @@ class ModelsImportForm(BaseModel):
 @router.post('/import', response_model=bool)
 async def import_models(
     request: Request,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
     form_data: ModelsImportForm = (...),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
-        user.id,
-        'workspace.models_import',
-        await Config.get('user.permissions'),
-        db=db,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
     try:
         data = form_data.models
         if isinstance(data, list):

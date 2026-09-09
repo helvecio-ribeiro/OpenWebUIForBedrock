@@ -93,6 +93,9 @@
 	import ArchiveBoxIcon from '$lib/components/icons/ArchiveBox.svelte';
 	import GarbageBinIcon from '$lib/components/icons/GarbageBin.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
+	import WebPanels from './Sidebar/WebPanels.svelte';
+	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
+	import { createWebPanel } from '$lib/apis/webPanels';
 
 	const BREAKPOINT = 768;
 	const DEFAULT_PINNED_ITEMS = [];
@@ -845,6 +848,19 @@
 		await tick();
 	};
 
+	const newWebPanelHandler = async () => {
+		const panel = await createWebPanel(localStorage.token).catch((error) => {
+			toast.error(`${error}`);
+			return null;
+		});
+
+		if (panel) {
+			window.dispatchEvent(new CustomEvent('web-panels-changed'));
+			await goto(`/web-panels/${panel.id}`);
+			itemClickHandler();
+		}
+	};
+
 	const isWindows = /Windows/i.test(navigator.userAgent);
 </script>
 
@@ -1009,6 +1025,22 @@
 								<EditPencilIcon className="size-4" strokeWidth="1.5" />
 							</div>
 						</a>
+					</Tooltip>
+				</div>
+
+				<div class="">
+					<Tooltip content="New Tab" placement="right">
+						<button
+							class="cursor-pointer flex size-8 items-center justify-center transition group"
+							on:click|stopPropagation={newWebPanelHandler}
+							aria-label="New Tab"
+						>
+							<div
+								class="self-center flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
+							>
+								<GlobeAlt className="size-4" />
+							</div>
+						</button>
 					</Tooltip>
 				</div>
 
@@ -1224,6 +1256,22 @@
 
 					<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 						<button
+							id="sidebar-new-web-panel-button"
+							class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
+							on:click={newWebPanelHandler}
+							aria-label="New Tab"
+						>
+							<div class="self-center flex size-4 shrink-0 items-center justify-center">
+								<GlobeAlt className="size-4" />
+							</div>
+							<div class="flex flex-1 self-center translate-y-[0.5px]">
+								<div class="self-center text-[13px] leading-5">New Tab</div>
+							</div>
+						</button>
+					</div>
+
+					<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
+						<button
 							id="sidebar-search-button"
 							class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
 							on:click={() => {
@@ -1293,7 +1341,6 @@
 						<PinnedModelList bind:selectedChatId {shiftKey} />
 					</SidebarSection>
 				{/if}
-
 
 				{#if $config?.features?.enable_channels && ($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))}
 					<SidebarSection
@@ -1709,6 +1756,7 @@
 						</div>
 					</div>
 				</SidebarSection>
+				<WebPanels />
 			</div>
 
 			<div class="px-1 pt-1 pb-1.5 sticky bottom-0 z-10 -mt-2 sidebar">
@@ -1768,7 +1816,8 @@
 			aria-label={$i18n.t('Resize sidebar')}
 		>
 			<div
-				class=" absolute -left-1.5 -right-1.5 -top-0 -bottom-0 z-20 cursor-col-resize bg-transparent"></div>
+				class=" absolute -left-1.5 -right-1.5 -top-0 -bottom-0 z-20 cursor-col-resize bg-transparent"
+			></div>
 		</div>
 	{/if}
 {/if}

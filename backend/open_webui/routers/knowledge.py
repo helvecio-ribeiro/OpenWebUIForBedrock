@@ -40,7 +40,7 @@ from open_webui.routers.retrieval import (
     process_files_batch,
 )
 from open_webui.storage.provider import Storage
-from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
+from open_webui.utils.access_control import filter_allowed_access_grants
 from open_webui.utils.access_control.files import has_access_to_file
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
@@ -277,20 +277,12 @@ async def search_knowledge_files(
 async def create_new_knowledge(
     request: Request,
     form_data: KnowledgeForm,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
 ):
     # NOTE: We intentionally do NOT use Depends(get_async_session) here.
-    # Database operations (has_permission, filter_allowed_access_grants, insert_new_knowledge) manage their own sessions.
+    # Database operations (filter_allowed_access_grants, insert_new_knowledge) manage their own sessions.
     # This prevents holding a connection during embed_knowledge_base_metadata()
     # which makes external embedding API calls (1-5+ seconds).
-    if user.role != 'admin' and not await has_permission(
-        user.id, 'workspace.knowledge', await Config.get('user.permissions')
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
-
     form_data.access_grants = await filter_allowed_access_grants(
         await Config.get('user.permissions'),
         user.id,

@@ -65,6 +65,10 @@ export const folders = writable([]);
 export const selectedFolder = writable(null);
 
 export const models: Writable<Model[]> = writable([]);
+// The model selection currently shown by Chat. Unlike the legacy
+// sessionStorage.selectedModels handoff, this state is not consumed during Chat
+// initialization and can safely be used by sibling experiences such as Web Panels.
+export const activeChatModelIds: Writable<string[]> = writable([]);
 
 export const knowledge: Writable<null | Document[]> = writable(null);
 export const tools = writable(null);

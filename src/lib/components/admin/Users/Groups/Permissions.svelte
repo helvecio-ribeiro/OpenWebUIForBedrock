@@ -6,7 +6,6 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
 	import { DEFAULT_PERMISSIONS } from '$lib/constants/permissions';
-	import { config } from '$lib/stores';
 
 	export let permissions = {};
 	export let defaultPermissions = {};
@@ -20,7 +19,6 @@
 		return {
 			...defaults,
 			...obj,
-			workspace: { ...defaults.workspace, ...obj.workspace },
 			sharing: { ...defaults.sharing, ...obj.sharing },
 			access_grants: { ...defaults.access_grants, ...obj.access_grants },
 			chat: { ...defaults.chat, ...obj.chat },
@@ -39,197 +37,6 @@
 	{$i18n.t('Model Filtering')}
 	{$i18n.t('Model Permissions')}
 	{$i18n.t('No model IDs')} -->
-
-	<div>
-		<div class=" mb-2 text-sm font-normal">{$i18n.t('Workspace Permissions')}</div>
-
-		<div class="flex flex-col w-full">
-			<div class="flex w-full justify-between my-1">
-				<div class=" self-center text-xs font-normal">
-					{$i18n.t('Models Access')}
-				</div>
-				<Switch bind:state={permissions.workspace.models} ariaLabel={$i18n.t('Models Access')} />
-			</div>
-
-			{#if permissions.workspace.models}
-				<div class="ml-2 flex flex-col gap-2 pt-0.5 pb-1">
-					<div class="flex w-full justify-between">
-						<div class="self-center text-xs">
-							{$i18n.t('Import Models')}
-						</div>
-						<Switch
-							bind:state={permissions.workspace.models_import}
-							ariaLabel={$i18n.t('Import Models')}
-						/>
-					</div>
-					<div class="flex w-full justify-between">
-						<div class="self-center text-xs">
-							{$i18n.t('Export Models')}
-						</div>
-						<Switch
-							bind:state={permissions.workspace.models_export}
-							ariaLabel={$i18n.t('Export Models')}
-						/>
-					</div>
-				</div>
-			{:else if defaultPermissions?.workspace?.models}
-				<div class="pb-0.5">
-					<div class="text-xs text-gray-500">
-						{$i18n.t('This is a default user permission and will remain enabled.')}
-					</div>
-				</div>
-			{/if}
-		</div>
-
-		<div class="flex flex-col w-full">
-			<div class="flex w-full justify-between my-1">
-				<div class=" self-center text-xs font-normal">
-					{$i18n.t('Knowledge Access')}
-				</div>
-				<Switch
-					bind:state={permissions.workspace.knowledge}
-					ariaLabel={$i18n.t('Knowledge Access')}
-				/>
-			</div>
-			{#if defaultPermissions?.workspace?.knowledge && !permissions.workspace.knowledge}
-				<div>
-					<div class="text-xs text-gray-500">
-						{$i18n.t('This is a default user permission and will remain enabled.')}
-					</div>
-				</div>
-			{/if}
-		</div>
-
-		<div class="flex flex-col w-full">
-			<div class="flex w-full justify-between my-1">
-				<div class=" self-center text-xs font-normal">
-					{$i18n.t('Prompts Access')}
-				</div>
-				<Switch bind:state={permissions.workspace.prompts} ariaLabel={$i18n.t('Prompts Access')} />
-			</div>
-
-			{#if permissions.workspace.prompts}
-				<div class="ml-2 flex flex-col gap-2 pt-0.5 pb-1">
-					<div class="flex w-full justify-between">
-						<div class="self-center text-xs">
-							{$i18n.t('Import Prompts')}
-						</div>
-						<Switch
-							bind:state={permissions.workspace.prompts_import}
-							ariaLabel={$i18n.t('Import Prompts')}
-						/>
-					</div>
-					<div class="flex w-full justify-between">
-						<div class="self-center text-xs">
-							{$i18n.t('Export Prompts')}
-						</div>
-						<Switch
-							bind:state={permissions.workspace.prompts_export}
-							ariaLabel={$i18n.t('Export Prompts')}
-						/>
-					</div>
-				</div>
-			{:else if defaultPermissions?.workspace?.prompts}
-				<div class="pb-0.5">
-					<div class="text-xs text-gray-500">
-						{$i18n.t('This is a default user permission and will remain enabled.')}
-					</div>
-				</div>
-			{/if}
-		</div>
-
-		{#if $config?.features?.enable_plugins}
-			<div class="flex flex-col w-full">
-				<Tooltip
-					className="flex w-full justify-between my-1"
-					content={$i18n.t(
-						'Warning: Enabling this will allow users to upload arbitrary code on the server.'
-					)}
-					placement="top-start"
-				>
-					<div class=" self-center text-xs font-normal">
-						{$i18n.t('Tools Access')}
-					</div>
-					<Switch bind:state={permissions.workspace.tools} ariaLabel={$i18n.t('Tools Access')} />
-				</Tooltip>
-
-				{#if permissions.workspace.tools}
-					<div class="ml-2 flex flex-col gap-2 pt-0.5 pb-1">
-						<div class="flex w-full justify-between">
-							<div class="self-center text-xs">
-								{$i18n.t('Import Tools')}
-							</div>
-							<Switch
-								bind:state={permissions.workspace.tools_import}
-								ariaLabel={$i18n.t('Import Tools')}
-							/>
-						</div>
-						<div class="flex w-full justify-between">
-							<div class="self-center text-xs">
-								{$i18n.t('Export Tools')}
-							</div>
-							<Switch
-								bind:state={permissions.workspace.tools_export}
-								ariaLabel={$i18n.t('Export Tools')}
-							/>
-						</div>
-					</div>
-				{:else if defaultPermissions?.workspace?.tools}
-					<div class="pb-0.5">
-						<div class="text-xs text-gray-500">
-							{$i18n.t('This is a default user permission and will remain enabled.')}
-						</div>
-					</div>
-				{/if}
-			</div>
-		{/if}
-
-		<div class="flex flex-col w-full">
-			<Tooltip
-				className="flex w-full justify-between my-1"
-				content={$i18n.t(
-					'Warning: Enabling this will allow users to upload arbitrary code on the server.'
-				)}
-				placement="top-start"
-			>
-				<div class=" self-center text-xs font-normal">
-					{$i18n.t('Skills Access')}
-				</div>
-				<Switch bind:state={permissions.workspace.skills} ariaLabel={$i18n.t('Skills Access')} />
-			</Tooltip>
-
-			{#if permissions.workspace.skills}
-				<div class="ml-2 flex flex-col gap-2 pt-0.5 pb-1">
-					<div class="flex w-full justify-between">
-						<div class="self-center text-xs">
-							{$i18n.t('Import Skills')}
-						</div>
-						<Switch
-							bind:state={permissions.workspace.skills_import}
-							ariaLabel={$i18n.t('Import Skills')}
-						/>
-					</div>
-					<div class="flex w-full justify-between">
-						<div class="self-center text-xs">
-							{$i18n.t('Export Skills')}
-						</div>
-						<Switch
-							bind:state={permissions.workspace.skills_export}
-							ariaLabel={$i18n.t('Export Skills')}
-						/>
-					</div>
-				</div>
-			{:else if defaultPermissions?.workspace?.skills}
-				<div class="pb-0.5">
-					<div class="text-xs text-gray-500">
-						{$i18n.t('This is a default user permission and will remain enabled.')}
-					</div>
-				</div>
-			{/if}
-		</div>
-	</div>
-
-	<hr class=" border-gray-100/30 dark:border-gray-850/30" />
 
 	<div>
 		<div class=" mb-2 text-sm font-normal">{$i18n.t('Sharing Permissions')}</div>
@@ -477,7 +284,6 @@
 				{/if}
 			</div>
 		{/if}
-
 	</div>
 
 	<hr class=" border-gray-100/30 dark:border-gray-850/30" />

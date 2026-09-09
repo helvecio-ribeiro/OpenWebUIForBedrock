@@ -10,6 +10,7 @@
 	import { getBackendConfig } from '$lib/apis';
 
 	import AdvancedParams from '$lib/components/chat/Settings/Advanced/AdvancedParams.svelte';
+	import Textarea from '$lib/components/common/Textarea.svelte';
 	import Capabilities from '$lib/components/workspace/Models/Capabilities.svelte';
 	import DefaultFeatures from '$lib/components/workspace/Models/DefaultFeatures.svelte';
 	import BuiltinTools from '$lib/components/workspace/Models/BuiltinTools.svelte';
@@ -29,6 +30,7 @@
 
 	let defaultCapabilities = {};
 	let defaultFeatureIds = [];
+	/** @type {Record<string, any>} */
 	let defaultParams = {};
 	let builtinTools = {};
 	let promptSuggestions = [];
@@ -151,6 +153,23 @@
 			<div class="py-1 text-xs text-gray-400 dark:text-gray-600">{$i18n.t('Loading...')}</div>
 		{:else}
 			<div class="space-y-1 mt-0.5">
+				<div class="pb-2">
+					<div class="mb-1 text-xs text-gray-600 dark:text-gray-400">
+						{$i18n.t('System Prompt')}
+					</div>
+					<div class="mb-1.5 text-[0.6875rem] leading-4 text-gray-400 dark:text-gray-600">
+						{$i18n.t(
+							'Default system prompt for Lambda WebUI model requests from every user, including Browser actions. Model-specific configuration may override this default.'
+						)}
+					</div>
+					<Textarea
+						bind:value={defaultParams.system}
+						rows={5}
+						placeholder={$i18n.t('Enter the system-wide model prompt')}
+						on:input={updateDirty}
+					/>
+				</div>
+
 				<div>
 					<button
 						class="flex w-full items-center justify-between gap-4 py-0.5 text-left"
@@ -241,12 +260,7 @@
 						<!-- svelte-ignore a11y-click-events-have-key-events -->
 						<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 						<!-- svelte-ignore a11y-no-static-element-interactions -->
-						<div
-							class="pb-2"
-							on:click={updateDirty}
-							on:change={updateDirty}
-							on:input={updateDirty}
-						>
+						<div class="pb-2" on:click={updateDirty} on:change={updateDirty} on:input={updateDirty}>
 							<PromptSuggestions bind:promptSuggestions />
 						</div>
 					{/if}

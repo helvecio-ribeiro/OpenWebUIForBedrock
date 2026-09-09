@@ -23,7 +23,7 @@ from open_webui.models.prompts import (
     Prompts,
     PromptUserResponse,
 )
-from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
+from open_webui.utils.access_control import filter_allowed_access_grants
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -144,28 +144,9 @@ async def get_prompt_list(
 async def create_new_prompt(
     request: Request,
     form_data: PromptForm,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not (
-        await has_permission(
-            user.id,
-            'workspace.prompts',
-            await Config.get('user.permissions'),
-            db=db,
-        )
-        or await has_permission(
-            user.id,
-            'workspace.prompts_import',
-            await Config.get('user.permissions'),
-            db=db,
-        )
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
-
     form_data.access_grants = await filter_allowed_access_grants(
         await Config.get('user.permissions'),
         user.id,

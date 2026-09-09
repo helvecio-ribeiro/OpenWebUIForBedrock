@@ -1,19 +1,4 @@
 export const DEFAULT_PERMISSIONS = {
-	workspace: {
-		models: false,
-		knowledge: false,
-		prompts: false,
-		tools: false,
-		skills: false,
-		models_import: false,
-		models_export: false,
-		prompts_import: false,
-		prompts_export: false,
-		tools_import: false,
-		tools_export: false,
-		skills_import: false,
-		skills_export: false
-	},
 	sharing: {
 		models: false,
 		public_models: false,
@@ -27,7 +12,7 @@ export const DEFAULT_PERMISSIONS = {
 		public_skills: false,
 		folders: false,
 		public_chats: false,
-		open_chats: false,
+		open_chats: false
 	},
 	access_grants: {
 		allow_users: true,

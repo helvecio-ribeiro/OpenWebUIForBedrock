@@ -25,8 +25,6 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import OnBoarding from '$lib/components/OnBoarding.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
-	import { redirect } from '@sveltejs/kit';
-
 	const i18n = getContext('i18n');
 
 	let loaded = false;

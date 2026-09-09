@@ -18,7 +18,7 @@ from open_webui.models.skills import (
     Skills,
     SkillUserResponse,
 )
-from open_webui.utils.access_control import filter_allowed_access_grants, has_permission
+from open_webui.utils.access_control import filter_allowed_access_grants
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -132,20 +132,9 @@ async def get_skill_list(
 @router.get('/export', response_model=list[SkillModel])
 async def export_skills(
     request: Request,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
-        user.id,
-        'workspace.skills_export',
-        await Config.get('user.permissions'),
-        db=db,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
-
     if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
         return await Skills.get_skills(db=db)
     else:
@@ -161,18 +150,9 @@ async def export_skills(
 async def create_new_skill(
     request: Request,
     form_data: SkillForm,
-    user=Depends(get_verified_user),
+    user=Depends(get_admin_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not (
-        await has_permission(user.id, 'workspace.skills', await Config.get('user.permissions'), db=db)
-        or await has_permission(user.id, 'workspace.skills_import', await Config.get('user.permissions'), db=db)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.UNAUTHORIZED,
-        )
-
     form_data.id = form_data.id.lower().replace(' ', '-')
 
     existing = await Skills.get_skill_by_id(form_data.id, db=db)
@@ -183,10 +163,7 @@ async def create_new_skill(
         )
 
     # Strip public/user grants the requesting user is not permitted to assign
-    # Without this, a user with
-    # workspace.skills permission could attach principal_id='*' read/write
-    # grants in the create payload, bypassing the sharing.public_skills gate
-    # that the dedicated /access/update endpoint already enforces.
+    # Keep grant filtering consistent with the dedicated access endpoint.
     form_data.access_grants = await filter_allowed_access_grants(
         await Config.get('user.permissions'),
         user.id,

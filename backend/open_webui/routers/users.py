@@ -172,22 +172,6 @@ async def get_user_permissisions(
 ############################
 # User Default Permissions
 ############################
-class WorkspacePermissions(BaseModel):
-    models: bool = False
-    knowledge: bool = False
-    prompts: bool = False
-    tools: bool = False
-    skills: bool = False
-    models_import: bool = False
-    models_export: bool = False
-    prompts_import: bool = False
-    prompts_export: bool = False
-    tools_import: bool = False
-    tools_export: bool = False
-    skills_import: bool = False
-    skills_export: bool = False
-
-
 class SharingPermissions(BaseModel):
     models: bool = False
     public_models: bool = False
@@ -253,7 +237,6 @@ class SettingsPermissions(BaseModel):
 
 
 class UserPermissions(BaseModel):
-    workspace: WorkspacePermissions
     sharing: SharingPermissions
     access_grants: AccessGrantsPermissions
     chat: ChatPermissions
@@ -388,7 +371,6 @@ def _calculate_streaks(heatmap: list[dict]) -> dict[str, int]:
 async def get_default_user_permissions(request: Request, user=Depends(get_admin_user)):
     user_permissions = await Config.get('user.permissions')
     return {
-        'workspace': WorkspacePermissions(**user_permissions.get('workspace', {})),
         'sharing': SharingPermissions(**user_permissions.get('sharing', {})),
         'access_grants': AccessGrantsPermissions(**user_permissions.get('access_grants', {})),
         'chat': ChatPermissions(**user_permissions.get('chat', {})),
@@ -416,7 +398,6 @@ async def get_default_user_permissions_defaults(user=Depends(get_admin_user)):
     from open_webui.config import DEFAULT_USER_PERMISSIONS
 
     return {
-        'workspace': WorkspacePermissions(**DEFAULT_USER_PERMISSIONS.get('workspace', {})),
         'sharing': SharingPermissions(**DEFAULT_USER_PERMISSIONS.get('sharing', {})),
         'access_grants': AccessGrantsPermissions(**DEFAULT_USER_PERMISSIONS.get('access_grants', {})),
         'chat': ChatPermissions(**DEFAULT_USER_PERMISSIONS.get('chat', {})),
