@@ -83,7 +83,6 @@
 	import Photo from '../icons/Photo.svelte';
 	import Wrench from '../icons/Wrench.svelte';
 	import Cube from '../icons/Cube.svelte';
-	import Sparkles from '../icons/Sparkles.svelte';
 	import Mic from '../icons/Mic.svelte';
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
@@ -96,8 +95,6 @@
 	import Dropdown from '../common/Dropdown.svelte';
 
 	import CommandSuggestionList from './MessageInput/CommandSuggestionList.svelte';
-	import Knobs from '../icons/Knobs.svelte';
-	import ValvesModal from '../workspace/common/ValvesModal.svelte';
 	import InputModal from '../common/InputModal.svelte';
 	import Expand from '../icons/Expand.svelte';
 	import QueuedMessageItem from './MessageInput/QueuedMessageItem.svelte';
@@ -145,7 +142,7 @@
 	export let prompt = '';
 	export let files = [];
 
-	export let selectedToolIds = [];
+	export let selectedMcpServerIds = [];
 	export let selectedSkillIds = [];
 	export let selectedFilterIds = [];
 
@@ -171,16 +168,8 @@
 	let inputVariables = {};
 	let inputVariableValues = {};
 
-	let showValvesModal = false;
 	let showStatusPanel = false;
 	let copiedStatusChatId = false;
-	let selectedValvesType = 'tool'; // 'tool' or 'function'
-	let selectedValvesItemId = null;
-	let integrationsMenuCloseOnOutsideClick = true;
-
-	$: if (!showValvesModal) {
-		integrationsMenuCloseOnOutsideClick = true;
-	}
 
 	$: onChange({
 		prompt,
@@ -193,7 +182,7 @@
 					access_grants: undefined
 				};
 			}),
-		selectedToolIds,
+		selectedMcpServerIds,
 		selectedSkillIds,
 		selectedFilterIds,
 		imageGenerationEnabled,
@@ -661,7 +650,7 @@
 		.reduce((acc, filters) => acc.filter((f1) => filters.some((f2) => f2.id === f1.id)));
 
 	let showToolsButton = false;
-	$: showToolsButton = ($tools ?? []).length > 0 || ($toolServers ?? []).length > 0;
+	$: showToolsButton = ($tools ?? []).length > 0;
 
 	let showSkillsButton = false;
 	$: showSkillsButton = ($skills ?? []).some((skill) => skill.is_active);
@@ -1298,26 +1287,13 @@
 	});
 </script>
 
-<ToolServersModal bind:show={showTools} {selectedToolIds} />
+<ToolServersModal bind:show={showTools} {selectedMcpServerIds} />
 <SkillsModal bind:show={showSkills} {selectedSkillIds} />
 
 <InputVariablesModal
 	bind:show={showInputVariablesModal}
 	variables={inputVariables}
 	onSave={inputVariablesModalCallback}
-/>
-
-<ValvesModal
-	bind:show={showValvesModal}
-	userValves={true}
-	type={selectedValvesType}
-	id={selectedValvesItemId ?? null}
-	on:save={async () => {
-		await tick();
-	}}
-	on:close={() => {
-		integrationsMenuCloseOnOutsideClick = true;
-	}}
 />
 
 <InputModal
@@ -1815,7 +1791,7 @@
 														if (e.key === 'Escape') {
 															console.log('Escape');
 															atSelectedModel = undefined;
-															selectedToolIds = [];
+															selectedMcpServerIds = [];
 															selectedFilterIds = [];
 
 															webSearchEnabled = false;
@@ -1932,32 +1908,23 @@
 
 									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
 										<div
-											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"></div>
+											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"
+										></div>
 									{/if}
 
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
-										{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
+										{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton}
 											<IntegrationsMenu
 												selectedModels={selectedModelIds}
-												{toggleFilters}
 												{showWebSearchButton}
 												{showImageGenerationButton}
 												{showCodeInterpreterButton}
-												bind:selectedToolIds
+												bind:selectedMcpServerIds
 												bind:selectedSkillIds
-												bind:selectedFilterIds
 												bind:webSearchEnabled
 												bind:imageGenerationEnabled
 												bind:codeInterpreterEnabled
 												{onWebSearchToggle}
-												closeOnOutsideClick={integrationsMenuCloseOnOutsideClick}
-												onShowValves={(e) => {
-													const { type, id } = e;
-													selectedValvesType = type;
-													selectedValvesItemId = id;
-													showValvesModal = true;
-													integrationsMenuCloseOnOutsideClick = false;
-												}}
 												onClose={async () => {
 													await tick();
 
@@ -1976,30 +1943,11 @@
 											</IntegrationsMenu>
 										{/if}
 
-										{#if selectedModelIds.length === 1 && $models.find((m) => m.id === selectedModelIds[0])?.has_user_valves}
-											<div class="ml-1 flex gap-1.5 shrink-0">
-												<Tooltip content={$i18n.t('Valves')} placement="top">
-													<button
-														type="button"
-														id="model-valves-button"
-														class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-[1.875rem] flex justify-center items-center outline-hidden focus:outline-hidden"
-														on:click={() => {
-															selectedValvesType = 'function';
-															selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
-															showValvesModal = true;
-														}}
-													>
-														<Knobs className="size-4" strokeWidth="1.5" />
-													</button>
-												</Tooltip>
-											</div>
-										{/if}
-
 										<div class="ml-1 flex gap-1.5 shrink-0">
-											{#if (selectedToolIds ?? []).length > 0}
+											{#if (selectedMcpServerIds ?? []).length > 0}
 												<Tooltip
 													content={$i18n.t('{{COUNT}} Available Tools', {
-														COUNT: (selectedToolIds ?? []).length
+														COUNT: (selectedMcpServerIds ?? []).length
 													})}
 												>
 													<button
@@ -2013,7 +1961,7 @@
 														<Wrench className="size-4" strokeWidth="1.75" />
 
 														<span class="text-sm">
-															{(selectedToolIds ?? []).length}
+															{(selectedMcpServerIds ?? []).length}
 														</span>
 													</button>
 												</Tooltip>
@@ -2041,66 +1989,6 @@
 													</button>
 												</Tooltip>
 											{/if}
-
-											{#each selectedFilterIds as filterId (filterId)}
-												{@const filter = toggleFilters.find((f) => f.id === filterId)}
-												{#if filter}
-													<Tooltip content={filter?.name} placement="top">
-														<button
-															on:click|preventDefault={() => {
-																if (
-																	filter?.has_user_valves &&
-																	($_user?.role === 'admin' ||
-																		($_user?.permissions?.chat?.valves ?? true))
-																) {
-																	selectedValvesType = 'function';
-																	selectedValvesItemId = filterId;
-																	showValvesModal = true;
-																} else {
-																	selectedFilterIds = selectedFilterIds.filter(
-																		(id) => id !== filterId
-																	);
-																}
-															}}
-															type="button"
-															class="group p-[6px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {selectedFilterIds.includes(
-																filterId
-															)
-																? 'text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-																: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} capitalize"
-														>
-															{#if filter?.icon}
-																<div class="size-4 items-center flex justify-center">
-																	<img
-																		src={filter.icon}
-																		class="size-3.5 {filter.icon.includes('data:image/svg')
-																			? 'dark:invert-[80%]'
-																			: ''}"
-																		style="fill: currentColor;"
-																		alt={filter.name}
-																	/>
-																</div>
-															{:else}
-																<Sparkles className="size-4" strokeWidth="1.75" />
-															{/if}
-															<!-- svelte-ignore a11y-click-events-have-key-events -->
-															<!-- svelte-ignore a11y-no-static-element-interactions -->
-															<div
-																class="hidden group-hover:block"
-																on:click={(e) => {
-																	e.stopPropagation();
-																	e.preventDefault();
-																	selectedFilterIds = selectedFilterIds.filter(
-																		(id) => id !== filterId
-																	);
-																}}
-															>
-																<XMark className="size-4" strokeWidth="1.75" />
-															</div>
-														</button>
-													</Tooltip>
-												{/if}
-											{/each}
 
 											{#if webSearchEnabled}
 												<Tooltip content={$i18n.t('Web Search')} placement="top">
@@ -2324,14 +2212,14 @@
 																stream = null;
 
 																if ($settings.audio?.tts?.engine === 'browser-kokoro') {
-																			await getOrInitKokoroWorker(
-																				$settings.audio?.tts?.engineConfig?.dtype ?? 'q8',
-																				$config.features?.kokoro_device ?? 'auto',
-																				resolveKokoroVoiceId(
-																					$config.features?.kokoro_default_voice ??
-																						$settings.audio?.tts?.voice
-																				)
-																			);
+																	await getOrInitKokoroWorker(
+																		$settings.audio?.tts?.engineConfig?.dtype ?? 'q8',
+																		$config.features?.kokoro_device ?? 'auto',
+																		resolveKokoroVoiceId(
+																			$config.features?.kokoro_default_voice ??
+																				$settings.audio?.tts?.voice
+																		)
+																	);
 																}
 
 																showCallOverlay.set(true);

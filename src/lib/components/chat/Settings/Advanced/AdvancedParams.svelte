@@ -20,7 +20,6 @@
 		stream_response: true, // Set stream responses for this model individually
 		stream_delta_chunk_size: 1, // Set the chunk size for streaming responses
 		compact_token_threshold: null,
-		function_calling: null,
 		reasoning_tags: null,
 		seed: null,
 		stop: null,
@@ -243,43 +242,6 @@
 			{/if}
 		</div>
 	{/if}
-
-	<div>
-		<Tooltip
-			content={$i18n.t(
-				"Native mode (default) leverages the model's built-in tool-calling capabilities. Legacy mode works with a wider range of models by calling tools once before execution via prompt injection."
-			)}
-			placement="top-start"
-			className="inline-tooltip"
-		>
-			<div class=" py-0.5 flex w-full justify-between">
-				<div class=" self-center text-xs">
-					{$i18n.t('Function Calling')}
-				</div>
-				<button
-					class="p-1 px-3 text-xs flex rounded-sm transition"
-					on:click={() => {
-						if ((params?.function_calling ?? null) === null) {
-							params.function_calling = 'native';
-						} else if (params.function_calling === 'native') {
-							params.function_calling = 'legacy';
-						} else {
-							params.function_calling = null;
-						}
-					}}
-					type="button"
-				>
-					{#if params.function_calling === 'native'}
-						<span class="ml-2 self-center">{$i18n.t('Native')}</span>
-					{:else if params.function_calling === 'legacy'}
-						<span class="ml-2 self-center">{$i18n.t('Legacy')}</span>
-					{:else}
-						<span class="ml-2 self-center">{$i18n.t('Default')}</span>
-					{/if}
-				</button>
-			</div>
-		</Tooltip>
-	</div>
 
 	<div class=" py-0.5 w-full justify-between">
 		<Tooltip

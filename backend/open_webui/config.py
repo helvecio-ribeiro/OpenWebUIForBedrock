@@ -1755,14 +1755,6 @@ USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING = (
 )
 
 
-USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING', 'False').lower() == 'true'
-)
-
-USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING = (
-    os.getenv('USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING', 'False').lower() == 'true'
-)
-
 USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING = (
     os.getenv('USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING', 'False').lower() == 'true'
 )
@@ -1879,8 +1871,6 @@ DEFAULT_USER_PERMISSIONS = {
         'public_knowledge': USER_PERMISSIONS_WORKSPACE_KNOWLEDGE_ALLOW_PUBLIC_SHARING,
         'prompts': USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_SHARING,
         'public_prompts': USER_PERMISSIONS_WORKSPACE_PROMPTS_ALLOW_PUBLIC_SHARING,
-        'tools': USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_SHARING,
-        'public_tools': USER_PERMISSIONS_WORKSPACE_TOOLS_ALLOW_PUBLIC_SHARING,
         'skills': USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_SHARING,
         'public_skills': USER_PERMISSIONS_WORKSPACE_SKILLS_ALLOW_PUBLIC_SHARING,
         'folders': USER_PERMISSIONS_FOLDERS_ALLOW_SHARING,
@@ -2306,31 +2296,10 @@ ERROR HANDLING:
 
 Stay consistent, helpful, and easy to listen to."""
 
-TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = os.getenv('TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE', '')
-
-
 DEFAULT_TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE = """Available Tools: {{TOOLS}}
 
-Your task is to choose and return the correct tool(s) from the list of available tools based on the query. Follow these guidelines:
-
-- Return only the JSON object, without any additional text or explanation.
-
-- If no tools match the query, return an empty array: 
-   {
-     "tool_calls": []
-   }
-
-- If one or more tools match the query, construct a JSON response containing a "tool_calls" array with objects that include:
-   - "name": The tool's name.
-   - "parameters": A dictionary of required parameters and their corresponding values.
-
-The format for the JSON response is strictly:
-{
-  "tool_calls": [
-    {"name": "toolName1", "parameters": {"key1": "value1"}},
-    {"name": "toolName2", "parameters": {"key2": "value2"}}
-  ]
-}"""
+Return a JSON object containing a tool_calls array. Each entry must have a tool name and parameters.
+Return {"tool_calls": []} when no tool applies."""
 
 
 DEFAULT_EMOJI_GENERATION_PROMPT_TEMPLATE = """Your task is to reflect the speaker's likely facial expression through a fitting emoji. Interpret emotions from the message and reflect their facial expression using fitting, diverse emojis (e.g., 😊, 😢, 😡, 😱).
@@ -2981,6 +2950,7 @@ DEFAULT_CONFIG = {
     'ui.model_order_list': MODEL_ORDER_LIST,
     'models.default_metadata': DEFAULT_MODEL_METADATA,
     'models.default_params': DEFAULT_MODEL_PARAMS,
+    'prompts.global_system': '',
     'ui.default_user_role': DEFAULT_USER_ROLE,
     'ui.default_group_id': DEFAULT_GROUP_ID,
     'ui.pending_user_overlay_title': PENDING_USER_OVERLAY_TITLE,
@@ -3035,7 +3005,6 @@ DEFAULT_CONFIG = {
     'task.autocomplete.prompt_template': AUTOCOMPLETE_GENERATION_PROMPT_TEMPLATE,
     'task.voice.prompt_template': VOICE_MODE_PROMPT_TEMPLATE,
     'task.voice.prompt.enable': ENABLE_VOICE_MODE_PROMPT,
-    'task.tools.prompt_template': TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE,
     'auth.enable_api_keys': ENABLE_API_KEYS,
     'auth.api_key.endpoint_restrictions': ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS,
     'auth.api_key.allowed_endpoints': API_KEYS_ALLOWED_ENDPOINTS,

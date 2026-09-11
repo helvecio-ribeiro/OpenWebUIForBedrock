@@ -35,7 +35,6 @@ from open_webui.models.users import (
 from open_webui.models.access_grants import AccessGrants
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
-from open_webui.models.tools import Tools
 from open_webui.socket.main import disconnect_user_sessions
 from open_webui.utils.access_control import get_permissions, has_permission
 from open_webui.utils.auth import (
@@ -179,8 +178,6 @@ class SharingPermissions(BaseModel):
     public_knowledge: bool = False
     prompts: bool = False
     public_prompts: bool = False
-    tools: bool = False
-    public_tools: bool = True
     skills: bool = False
     public_skills: bool = False
     folders: bool = False
@@ -411,12 +408,35 @@ async def get_default_user_permissions_defaults(user=Depends(get_admin_user)):
 ############################
 
 
+def remove_accidental_global_prompt_copy(settings: dict, global_prompt: str | None) -> dict:
+    """Remove only an exact legacy copy of the administrator prompt."""
+    normalized_global_prompt = str(global_prompt or '').strip()
+    ui_settings = settings.get('ui')
+    if (
+        not normalized_global_prompt
+        or not isinstance(ui_settings, dict)
+        or str(ui_settings.get('system') or '').strip() != normalized_global_prompt
+    ):
+        return settings
+
+    sanitized = {**settings, 'ui': {**ui_settings}}
+    sanitized['ui'].pop('system', None)
+    return sanitized
+
+
 @router.get('/user/settings', response_model=UserSettings | None)
 async def get_user_settings_by_session_user(
     user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
 ):
-    # user already fetched by get_verified_user — no need to refetch
-    return user.settings
+    # A previous bootstrap implementation could persist the administrator prompt
+    # as the user's own prompt. Do not expose that accidental copy as editable
+    # user state. Independent user prompts remain untouched.
+    settings = user.settings.model_dump() if isinstance(user.settings, UserSettings) else dict(user.settings or {})
+    settings = remove_accidental_global_prompt_copy(
+        settings,
+        await Config.get('prompts.global_system', ''),
+    )
+    return UserSettings.model_validate(settings) if settings else None
 
 
 ############################
@@ -439,7 +459,10 @@ async def update_user_settings_by_session_user(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    updated_user_settings = form_data.model_dump()
+    updated_user_settings = remove_accidental_global_prompt_copy(
+        form_data.model_dump(),
+        await Config.get('prompts.global_system', ''),
+    )
     ui_settings = updated_user_settings.get('ui')
     if (
         user.role != 'admin'
@@ -1069,18 +1092,6 @@ async def get_user_preview(
     )
     accessible_knowledge_ids = owned_knowledge_ids | granted_knowledge_ids
 
-    all_tools = await Tools.get_tools(defer_content=True, db=db)
-    owned_tool_ids = {t.id for t in all_tools if t.user_id == user_id}
-    granted_tool_ids = await AccessGrants.get_accessible_resource_ids(
-        user_id=user_id,
-        resource_type='tool',
-        resource_ids=[t.id for t in all_tools if t.user_id != user_id],
-        permission='read',
-        user_group_ids=user_group_ids,
-        db=db,
-    )
-    accessible_tool_ids = owned_tool_ids | granted_tool_ids
-
     return {
         'user': {'id': target_user.id, 'name': target_user.name},
         'groups': [{'id': g.id, 'name': g.name} for g in user_groups],
@@ -1091,9 +1102,5 @@ async def get_user_preview(
         'knowledge': {
             'items': [{'id': k.id, 'name': k.name} for k in all_knowledge if k.id in accessible_knowledge_ids],
             'total': len(all_knowledge),
-        },
-        'tools': {
-            'items': [{'id': t.id, 'name': t.name} for t in all_tools if t.id in accessible_tool_ids],
-            'total': len(all_tools),
         },
     }

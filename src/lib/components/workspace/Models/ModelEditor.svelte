@@ -2,12 +2,11 @@
 	import { toast } from 'svelte-sonner';
 
 	import { onMount, getContext, tick } from 'svelte';
-	import { models, tools, functions, user } from '$lib/stores';
+	import { models, tools, user } from '$lib/stores';
 	import { DEFAULT_CAPABILITIES } from '$lib/constants';
 
-	import { getTools } from '$lib/apis/tools';
+	import { getMCPTools } from '$lib/apis/mcp';
 	import { getSkills } from '$lib/apis/skills';
-	import { getFunctions } from '$lib/apis/functions';
 	import { getModelsDefaults } from '$lib/apis/configs';
 	import { getBaseModelTags, getModelTags } from '$lib/apis/models';
 	import { getVoices } from '$lib/apis/audio';
@@ -18,14 +17,11 @@
 	import Knowledge from '$lib/components/workspace/Models/Knowledge.svelte';
 	import ToolsSelector from '$lib/components/workspace/Models/ToolsSelector.svelte';
 	import SkillsSelector from '$lib/components/workspace/Models/SkillsSelector.svelte';
-	import FiltersSelector from '$lib/components/workspace/Models/FiltersSelector.svelte';
-	import ActionsSelector from '$lib/components/workspace/Models/ActionsSelector.svelte';
 	import Capabilities from '$lib/components/workspace/Models/Capabilities.svelte';
 	import Textarea from '$lib/components/common/Textarea.svelte';
 	import AccessControl from '../common/AccessControl.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
-	import DefaultFiltersSelector from './DefaultFiltersSelector.svelte';
 	import DefaultFeatures from './DefaultFeatures.svelte';
 	import BuiltinTools from './BuiltinTools.svelte';
 	import PromptSuggestions from './PromptSuggestions.svelte';
@@ -96,18 +92,14 @@
 	};
 
 	let knowledge = [];
-	let toolIds = [];
+	let mcpServerIds = [];
 	let skillIds = [];
 	let skillsList = [];
-
-	let filterIds = [];
-	let defaultFilterIds = [];
 
 	let capabilities = { ...DEFAULT_CAPABILITIES };
 	let defaultFeatureIds = [];
 	let builtinTools = {};
 
-	let actionIds = [];
 	let accessGrants = [];
 	let terminalId = '';
 	let tts = { voice: '' };
@@ -277,11 +269,11 @@
 			}
 		}
 
-		if (toolIds.length > 0) {
-			info.meta.toolIds = toolIds;
+		if (mcpServerIds.length > 0) {
+			info.meta.mcpServerIds = mcpServerIds;
 		} else {
-			if (info.meta.toolIds) {
-				delete info.meta.toolIds;
+			if (info.meta.mcpServerIds) {
+				delete info.meta.mcpServerIds;
 			}
 		}
 
@@ -293,29 +285,9 @@
 			}
 		}
 
-		if (filterIds.length > 0) {
-			info.meta.filterIds = filterIds;
-		} else {
-			if (info.meta.filterIds) {
-				delete info.meta.filterIds;
-			}
-		}
-
-		if (defaultFilterIds.length > 0) {
-			info.meta.defaultFilterIds = defaultFilterIds;
-		} else {
-			if (info.meta.defaultFilterIds) {
-				delete info.meta.defaultFilterIds;
-			}
-		}
-
-		if (actionIds.length > 0) {
-			info.meta.actionIds = actionIds;
-		} else {
-			if (info.meta.actionIds) {
-				delete info.meta.actionIds;
-			}
-		}
+		delete info.meta.filterIds;
+		delete info.meta.defaultFilterIds;
+		delete info.meta.actionIds;
 
 		if (defaultFeatureIds.length > 0) {
 			info.meta.defaultFeatureIds = defaultFeatureIds;
@@ -372,11 +344,8 @@
 	};
 
 	onMount(async () => {
-		await tools.set((await getTools(localStorage.token).catch(() => null)) ?? []);
+		await tools.set((await getMCPTools(localStorage.token).catch(() => null)) ?? []);
 		skillsList = (await getSkills(localStorage.token).catch(() => null)) ?? [];
-		if (!$functions) {
-			await functions.set(await getFunctions(localStorage.token));
-		}
 		if (suggestionTags.length === 0) {
 			await loadSuggestionTags();
 		}
@@ -452,11 +421,8 @@
 				}
 			});
 
-			toolIds = model?.meta?.toolIds ?? [];
+			mcpServerIds = model?.meta?.mcpServerIds ?? [];
 			skillIds = model?.meta?.skillIds ?? [];
-			filterIds = model?.meta?.filterIds ?? [];
-			defaultFilterIds = model?.meta?.defaultFilterIds ?? [];
-			actionIds = model?.meta?.actionIds ?? [];
 
 			// Per-model overrides take precedence over admin defaults
 			capabilities = { ...capabilities, ...(model?.meta?.capabilities ?? {}) };
@@ -898,50 +864,12 @@
 						</div>
 
 						<div class="my-3">
-							<ToolsSelector bind:selectedToolIds={toolIds} tools={$tools ?? []} />
+							<ToolsSelector bind:selectedMcpServerIds={mcpServerIds} tools={$tools ?? []} />
 						</div>
 
 						<div class="my-3">
 							<SkillsSelector bind:selectedSkillIds={skillIds} skills={skillsList} />
 						</div>
-
-						{#if ($functions ?? []).filter((func) => func.type === 'filter').length > 0 || ($functions ?? []).filter((func) => func.type === 'action').length > 0}
-							<hr class="my-3 border-gray-100/30 dark:border-gray-850/30" />
-
-							{#if ($functions ?? []).filter((func) => func.type === 'filter').length > 0}
-								<div class="my-3">
-									<FiltersSelector
-										bind:selectedFilterIds={filterIds}
-										filters={($functions ?? []).filter((func) => func.type === 'filter')}
-									/>
-								</div>
-
-								{@const toggleableFilters = $functions.filter(
-									(func) =>
-										func.type === 'filter' &&
-										(filterIds.includes(func.id) || func?.is_global) &&
-										func?.meta?.toggle
-								)}
-
-								{#if toggleableFilters.length > 0}
-									<div class="my-3">
-										<DefaultFiltersSelector
-											bind:selectedFilterIds={defaultFilterIds}
-											filters={toggleableFilters}
-										/>
-									</div>
-								{/if}
-							{/if}
-
-							{#if ($functions ?? []).filter((func) => func.type === 'action').length > 0}
-								<div class="my-3">
-									<ActionsSelector
-										bind:selectedActionIds={actionIds}
-										actions={($functions ?? []).filter((func) => func.type === 'action')}
-									/>
-								</div>
-							{/if}
-						{/if}
 
 						<hr class="my-3 border-gray-100/30 dark:border-gray-850/30" />
 
@@ -1041,7 +969,8 @@
 										rows="10"
 										value={JSON.stringify(info, null, 2)}
 										disabled
-										readonly></textarea>
+										readonly
+									></textarea>
 								</div>
 							{/if}
 						</div>

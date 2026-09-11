@@ -6,8 +6,6 @@ export const DEFAULT_PERMISSIONS = {
 		public_knowledge: false,
 		prompts: false,
 		public_prompts: false,
-		tools: false,
-		public_tools: false,
 		skills: false,
 		public_skills: false,
 		folders: false,
@@ -20,7 +18,6 @@ export const DEFAULT_PERMISSIONS = {
 	},
 	chat: {
 		controls: true,
-		valves: true,
 		system_prompt: true,
 		params: true,
 		file_upload: true,

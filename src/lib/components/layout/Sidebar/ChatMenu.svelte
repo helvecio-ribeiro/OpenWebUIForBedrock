@@ -424,7 +424,21 @@
 						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 select-none w-full"
 					>
 						<FolderIcon className="size-3.5" />
-						<div class="flex items-center">{$i18n.t('Move')}</div>
+						<div class="flex items-center">{$i18n.t('Move to folder')}</div>
+					</button>
+
+					<button
+						draggable="false"
+						class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 overflow-hidden w-full"
+						on:click={() => {
+							show = false;
+							moveChatHandler(chatId, null);
+						}}
+					>
+						<div class="shrink-0">
+							<FolderIcon className="size-3.5" />
+						</div>
+						<div class="truncate">{$i18n.t('No folder')}</div>
 					</button>
 
 					{#each $folders.sort((a, b) => b.updated_at - a.updated_at) as folder}
@@ -432,6 +446,7 @@
 							draggable="false"
 							class="flex h-[1.6875rem] gap-2 items-center rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40 overflow-hidden w-full"
 							on:click={() => {
+								show = false;
 								moveChatHandler(chatId, folder.id);
 							}}
 						>

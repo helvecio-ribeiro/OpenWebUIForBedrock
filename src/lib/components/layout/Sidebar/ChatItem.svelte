@@ -252,8 +252,8 @@
 		}
 	};
 
-	const moveChatHandler = async (chatId, folderId) => {
-		if (chatId && folderId) {
+	const moveChatHandler = async (chatId, folderId: string | null) => {
+		if (chatId) {
 			const res = await updateChatFolderIdById(localStorage.token, chatId, folderId).catch(
 				(error) => {
 					toast.error(`${error}`);
@@ -266,7 +266,9 @@
 
 				dispatch('change');
 
-				toast.success($i18n.t('Chat moved successfully'));
+				toast.success(
+					folderId ? $i18n.t('Chat moved successfully') : $i18n.t('Chat removed from folder')
+				);
 			}
 		} else {
 			toast.error($i18n.t('Failed to move chat'));

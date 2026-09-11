@@ -53,7 +53,6 @@ TASK_CONFIG_KEYS = {
     'ENABLE_SEARCH_QUERY_GENERATION': 'task.query.search.enable',
     'ENABLE_RETRIEVAL_QUERY_GENERATION': 'task.query.retrieval.enable',
     'QUERY_GENERATION_PROMPT_TEMPLATE': 'task.query.prompt_template',
-    'TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE': 'task.tools.prompt_template',
     'ENABLE_VOICE_MODE_PROMPT': 'task.voice.prompt.enable',
     'VOICE_MODE_PROMPT_TEMPLATE': 'task.voice.prompt_template',
 }
@@ -96,7 +95,6 @@ class TaskConfigForm(BaseModel):
     ENABLE_SEARCH_QUERY_GENERATION: bool
     ENABLE_RETRIEVAL_QUERY_GENERATION: bool
     QUERY_GENERATION_PROMPT_TEMPLATE: str
-    TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE: str
     ENABLE_VOICE_MODE_PROMPT: bool
     VOICE_MODE_PROMPT_TEMPLATE: Optional[str]
 

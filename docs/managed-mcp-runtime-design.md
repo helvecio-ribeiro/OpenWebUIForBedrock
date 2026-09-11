@@ -71,7 +71,12 @@ A server that fails manifest validation, MCP initialization, or tool discovery r
 
 The first Admin UI release covers registration, start, stop, restart, status, discovered tools, configuration references, access rules, and logs. Package upload and revision management are deferred until local-directory registration is stable.
 
-The runtime reconciles desired state after restart, prevents duplicate children, uses bounded restart backoff, and terminates complete process groups on stop. Runtime unavailability does not prevent Open WebUI itself from starting, and existing remote MCP/OpenAPI integrations remain unaffected.
+The runtime reconciles desired state after restart, prevents duplicate children, uses bounded restart backoff, and terminates complete process groups on stop. Runtime unavailability does not prevent Open WebUI itself from starting, and configured remote Streamable HTTP MCP integrations remain unaffected.
+
+The user-facing MCP catalog and chat request contract are MCP-specific: `GET /api/v1/mcp/servers`
+returns the authorized, secret-free local and remote inventory, while chat requests carry raw server
+IDs in `mcp_server_ids`. The user's selection persists across chats and is resolved again on every
+message. An omitted or empty selection means no MCP tools; it does not activate legacy tools.
 
 ## Example-server boundaries
 

@@ -6,6 +6,8 @@ This fork is branded as **Lambda WebUI**. Its canonical vector mark is `static/b
 
 It also adds a per-user **Browser** (internally called Web Panels): persistent browser-like tabs that replace the main Chat content while selected. Select **New Tab**, enter a public HTTP(S) address, and optionally rename it. Tabs support back, forward, reload, individual deletion, and Select/bulk deletion. Remote pages are fetched through a signed, panel-scoped backend proxy, their navigable resources are rewritten, and they run inside an origin-isolated sandbox. Selecting page text exposes **Explain Text**, **Find Bias**, and **Challenge Text** actions; **Summarize Page** is available from the same Panel Actions popup. These actions invoke the user's currently selected model and display the result over the page. Copying a selection-based result includes both the highlighted passage and the model's response. Private/local network destinations, embedded URL credentials, nonstandard ports, oversized responses, and non-HTTP protocols are rejected. Complex authentication, DRM, service workers, anti-bot systems, and JavaScript that depends strongly on the original origin may still be incompatible; the Browser is an integrated research surface, not a complete replacement for Chrome.
 
+Administrators can configure a **Global System Prompt** under **Admin Panel → Settings → General → Global Model Instructions**. The backend applies it to every model request—including regular chats, Browser Panel Actions, API-originated requests, and internal/background model requests. It is stored independently and is not copied into a user's System Prompt setting. For chats in a folder, the stable prompt order is **administrator prompt → user prompt → folder prompt**, followed by any model-, tool-, or feature-specific context. Leaving any layer empty simply omits that layer; leaving the administrator field empty disables the global prompt.
+
 The upstream project provides the core chat application, frontend, Ollama integration, OpenAI-compatible providers, and general documentation. This fork adds Bedrock discovery and invocation through the Converse APIs. It also makes hands-free conversations more reliable by tightening microphone activation, making TTS playback deterministic, supporting centrally enforced TTS settings, and providing a low-latency local Kokoro deployment path.
 
 For upstream features, configuration, and general troubleshooting, see the [Open WebUI repository](https://github.com/open-webui/open-webui) and [Open WebUI documentation](https://docs.openwebui.com/).
@@ -22,12 +24,13 @@ The integrated local MCP package/runtime architecture is recorded in [Managed MC
 
 ### Intentional feature removals
 
-This fork is not intended to remain directly upgrade-compatible with upstream Open WebUI. Two upstream feature areas were deliberately removed to keep the product focused and to avoid competing tool implementations:
+This fork is not intended to remain directly upgrade-compatible with upstream Open WebUI. These upstream feature areas were deliberately removed to keep the product focused and to avoid competing tool implementations:
 
-| Upstream feature | State in this fork | Replacement |
-| --- | --- | --- |
-| Calendar | Native UI, API routes, models, database tables, permissions, flags, alerts, and built-in model tools removed. | The optional **Local Calendar** MCP owns a single shared SQLite calendar, MCP tools, and a loopback REST API. |
-| Notes | Native UI, API routes, models, database tables, permissions, flags, collaboration code, and built-in model tools removed. | No replacement is currently provided. Use chats, files, knowledge collections, or add a purpose-built local MCP package if persistent notes become necessary. |
+| Upstream feature | State in this fork                                                                                                                                | Replacement                                                                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Calendar         | Native UI, API routes, models, database tables, permissions, flags, alerts, and built-in model tools removed.                                     | The optional **Local Calendar** MCP owns a single shared SQLite calendar, MCP tools, and a loopback REST API.                                                 |
+| Notes            | Native UI, API routes, models, database tables, permissions, flags, collaboration code, and built-in model tools removed.                         | No replacement is currently provided. Use chats, files, knowledge collections, or add a purpose-built local MCP package if persistent notes become necessary. |
+| Python Tools     | Database-backed executable Python Tools, CRUD/import/export APIs, dynamic loading, sharing permissions, and compatibility request fields removed. | Standard MCP servers are the sole extension path for model-callable external tools. Generic provider tool-call execution remains because MCP depends on it.   |
 
 Alembic retains no-op markers for the historical revision IDs so an existing installation can still traverse the migration chain. Cleanup migrations permanently remove the former Calendar and Notes tables and configuration. They do not migrate old Calendar or Notes data; take a database backup before upgrading an installation that still contains data from either feature.
 
@@ -38,6 +41,12 @@ The removal is an architectural boundary, not merely hidden navigation. Models c
 The Chats section of the sidebar has a **Select** mode. In this mode, checkboxes replace normal chat navigation and the section header exposes archive and delete actions. Both operations accept up to 500 explicitly selected chats, verify ownership on the backend, refresh the sidebar, and leave selection mode after success.
 
 Batch archive creates a ZIP under `DATA_DIR/archives/<user-id>/` before marking the chats archived. Each ZIP contains `manifest.json` plus one complete chat JSON document per selected chat. Chat metadata and messages are included; uploaded attachment binaries are not copied into the archive. Batch delete permanently removes the selected chats and requires confirmation.
+
+### Chat folders and prompt scope
+
+Folders organize related chats and may provide a folder-specific system prompt and shared files. A chat can be created inside a folder or moved later from either its sidebar `...` menu or the active-chat menu with **Move to folder**. Choose **No folder** to return it to the root Chats list. Moving a chat updates its folder association immediately; it does not copy or recreate the conversation.
+
+Prompt layers are intentionally independent. The administrator prompt establishes the installation-wide boundary, the user's System Prompt adds that user's defaults, and the folder prompt adds the narrow context for chats assigned to that folder. The backend merges these layers at request time in that order, so changing a global or folder prompt does not overwrite the persisted user setting.
 
 ### Managed MCP runtime
 
@@ -99,7 +108,7 @@ Registration is also available through the backend API. Endpoints under `/api/v1
 
 An empty grant list makes the server administrator-only. User and group grants use the existing `principal_type`, `principal_id`, and `permission: read` structure. Runtime state is stored atomically in `backend/data/managed-mcp/registry.json` by default. Copy that file and the registered package directories to back up definitions.
 
-The **Local Calendar** managed MCP owns its shared SQLite repository and loopback REST API; Open WebUI no longer contains native Calendar models, routes, permissions, flags, alerts, or tool definitions. **Local System Tools** supplies current date/time and confined filesystem operations. These packages are independent: enabling one does not enable the other, and each must be discovered and registered separately. Users enable registered tools from the chat integrations menu; that selection is persisted for subsequent chats. Setup, persistence, and tool behavior are documented in the [Managed MCP Examples guide](examples/managed-mcp/README.md).
+The **Local Calendar** managed MCP owns its shared SQLite repository and loopback REST API; Open WebUI no longer contains native Calendar models, routes, permissions, flags, alerts, or tool definitions. **Local System Tools** supplies current date/time and confined filesystem operations. These packages are independent: enabling one does not enable the other, and each must be discovered and registered separately. Users enable registered services from the chat integrations menu; the selected raw MCP server IDs are stored in user settings, persist across chats, and take effect on the next message without requiring a new conversation. If no MCP service is selected, the request proceeds without MCP tools; the model must not silently fall back to the removed Calendar or Python Tool implementations. Setup, persistence, and tool behavior are documented in the [Managed MCP Examples guide](examples/managed-mcp/README.md).
 
 The runtime exposes health at `/healthz`, authenticated readiness at `/readyz`, and authenticated management under `/api/servers`. Open WebUI connects to each ready server at `/mcp/{server-id}` using Streamable HTTP. Failed initialization leaves a server unavailable and exposes bounded stderr through its admin-only logs endpoint.
 
@@ -138,10 +147,9 @@ For more information, be sure to check out our [Open WebUI Documentation](https:
 
 - 🔐 **Granular RBAC & User Groups**: Administrators define detailed roles, groups, and permissions, giving each user exactly the access they need. Secure by default, with tailored experiences per group.
 
-- 🧩 **Plugin Support**: Extend Open WebUI with **Filters**, **Actions**, **Pipes**, **Tools**, and **Skills**. Connect external services through **MCP**, **MCPO**, and **OpenAPI tool servers**. Build custom integrations, rate limits, approval flows, data connections, and more.
+- 🧩 **MCP Tool Support**: Connect model-callable services through the managed local MCP runtime or configured MCP endpoints. Database-backed Python Tools are intentionally unavailable in this fork.
 
 - 🤖 **Models & Agents**: Wrap any base model with custom instructions, tools, and knowledge to build specialized agents. Supports dynamic variables, per-user/group access control, and community preset imports via [Open WebUI Community](https://openwebui.com/).
-
 
 - 📢 **Channels**: Real-time shared spaces where your team and AI models collaborate in one timeline. Tag models to draft or critique, with threads, reactions, pins, and access control.
 
@@ -332,7 +340,7 @@ The backend loads these values at startup and passes them explicitly to boto3. T
 
 The corresponding Bedrock models must also be enabled for the AWS account and region. Long-lived keys should not be committed to `.env`; use an IAM role or another secure credential provider for production.
 
-Selected Open WebUI tools, including managed MCP servers, are translated to Bedrock Converse `toolConfig`. Bedrock `toolUse` responses and subsequent tool results are translated back to OpenAI-compatible tool-call messages for the existing Open WebUI execution loop. Tool selection takes effect on the next message in the current chat; starting a new chat is not required. For tool-enabled Amazon Nova requests, the adapter removes unsupported top-level JSON Schema metadata, maps namespaced tool names to Nova-safe underscore names and back, and applies AWS's recommended greedy-decoding settings (`temperature=0`, `topK=1`) to avoid malformed ToolUse sequences; ordinary Nova chat parameters are unchanged.
+Selected MCP tools are translated to Bedrock Converse `toolConfig`. Bedrock `toolUse` responses and subsequent tool results are translated back to OpenAI-compatible tool-call messages for the existing execution loop. MCP server selection takes effect on the next message in the current chat; starting a new chat is not required. For tool-enabled Amazon Nova requests, the adapter removes unsupported top-level JSON Schema metadata, maps namespaced tool names to Nova-safe underscore names and back, and applies AWS's recommended greedy-decoding settings (`temperature=0`, `topK=1`) to avoid malformed ToolUse sequences; ordinary Nova chat parameters are unchanged.
 
 ### Voice Mode improvements in this fork
 
@@ -345,8 +353,9 @@ The upstream Voice Mode implementation has been adapted for long-running, hands-
 - Synthesized sentences are produced and played through a promise-based FIFO pipeline. Each item is played once and awaited to completion rather than repeatedly polling and re-enqueuing cache entries.
 - Voice Mode playback is isolated from the normal message audio queue, preventing unrelated queue state from truncating or replacing the active response.
 - During TTS playback, the waiting dots are replaced with a five-bar waveform driven by the actual audio signal, with the tallest bars centered.
+- Speech recognition uses the same centered five-bar visual language, driven by live microphone levels, so listening and playback states are visually consistent.
 - Rich display text and speech text are separated. Completed assistant messages persist a `speechContent` projection, and both Voice Mode and manual read-aloud prefer it while the UI retains the original Markdown. The projection removes non-speech code/details, converts headings and lists into sentences, and rewrites common structured fields such as `Date`, `Time`, and `Location` into natural spoken phrases. Older messages without the field are projected when played.
-- A complete utterance of “exit”, “exit voice mode”, “close voice mode”, “end voice conversation”, or “stop listening” is handled locally as a Voice Mode control command. It is not sent to the model: microphone activation is muted, the client speaks a deterministic “Goodbye,” and Voice Mode closes only after that TTS playback finishes. Longer sentences that merely contain those words do not trigger exit.
+- A complete utterance of “exit”, “exit voice mode”, “close voice mode”, “end voice conversation”, or “stop listening” is handled locally as a Voice Mode control command. It is not sent to the model: microphone activation is muted, the client speaks a deterministic “Goodbye,” and Voice Mode closes only after that TTS playback finishes. Exiting also collapses the right-side Controls panel. Longer sentences that merely contain those words do not trigger exit.
 
 For low-latency local speech recognition, the example environment uses Whisper `base`, English-only transcription, greedy decoding, and `int8` computation:
 
@@ -578,7 +587,10 @@ Before releasing an upstream merge, verify at least:
 5. Forced `bf_emma` synthesis reaches Kokoro-FastAPI and plays every sentence in order.
 6. The microphone reopens after successful playback and after a simulated TTS failure.
 7. The five-bar waveform appears only during actual TTS playback.
-8. `npm` production build and the relevant backend tests pass.
+8. Listening displays the matching five-bar microphone-level animation, and exiting Voice Mode collapses Controls.
+9. A chat can move into a folder and back to **No folder**, and receives prompts in administrator → user → folder order without duplicating the user prompt.
+10. An enabled MCP selection survives a new chat; an empty selection sends no MCP schemas; stopped or inaccessible selected services return a bounded error.
+11. `npm` production build and the relevant backend tests pass.
 
 ### Start the source application
 

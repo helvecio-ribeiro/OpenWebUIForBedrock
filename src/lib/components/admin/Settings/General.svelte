@@ -213,6 +213,23 @@
 				</div>
 			</AdminSettingSection>
 
+			<AdminSettingSection title={$i18n.t('Global Model Instructions')}>
+				<AdminSettingField
+					label={$i18n.t('Global System Prompt')}
+					description={$i18n.t(
+						'Applied to every model request and combined with model, user, and feature-specific instructions.'
+					)}
+				>
+					<Textarea
+						className={`${textareaClass} min-h-28`}
+						placeholder={$i18n.t(
+							'Enter instructions that all models must follow. Leave empty to disable.'
+						)}
+						bind:value={adminConfig.GLOBAL_SYSTEM_PROMPT}
+					/>
+				</AdminSettingField>
+			</AdminSettingSection>
+
 			<AdminSettingSection title={$i18n.t('Features')}>
 				<AdminSettingRow
 					label={$i18n.t('Community Sharing')}

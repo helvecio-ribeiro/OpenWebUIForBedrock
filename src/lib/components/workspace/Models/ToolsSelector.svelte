@@ -13,16 +13,16 @@
 	};
 
 	export let tools: Tool[] = [];
-	export let selectedToolIds: string[] = [];
+	export let selectedMcpServerIds: string[] = [];
 
 	const i18n = getContext('i18n') as any;
 
-	$: selectedTools = tools.filter((tool) => selectedToolIds.includes(tool.id));
+	$: selectedTools = tools.filter((tool) => selectedMcpServerIds.includes(tool.id));
 
 	const toggleTool = (tool: Tool) => {
-		selectedToolIds = selectedToolIds.includes(tool.id)
-			? selectedToolIds.filter((id) => id !== tool.id)
-			: [...selectedToolIds, tool.id];
+		selectedMcpServerIds = selectedMcpServerIds.includes(tool.id)
+			? selectedMcpServerIds.filter((id) => id !== tool.id)
+			: [...selectedMcpServerIds, tool.id];
 	};
 </script>
 
@@ -34,7 +34,7 @@
 			<TypeaheadSelector
 				id="model-tools-selector"
 				items={tools}
-				selectedIds={selectedToolIds}
+				selectedIds={selectedMcpServerIds}
 				placeholder={$i18n.t('Search tools')}
 				triggerLabel={$i18n.t('Select Tool')}
 				emptyLabel={$i18n.t('No tools found')}
@@ -43,7 +43,9 @@
 					toggleTool(e.detail);
 				}}
 				on:enableall={(e) => {
-					selectedToolIds = [...new Set([...selectedToolIds, ...e.detail.map((tool) => tool.id)])];
+					selectedMcpServerIds = [
+						...new Set([...selectedMcpServerIds, ...e.detail.map((tool) => tool.id)])
+					];
 				}}
 			/>
 		{/if}
@@ -60,7 +62,7 @@
 								state="checked"
 								on:change={(e) => {
 									if (e.detail === 'unchecked') {
-										selectedToolIds = selectedToolIds.filter((id) => id !== tool.id);
+										selectedMcpServerIds = selectedMcpServerIds.filter((id) => id !== tool.id);
 									}
 								}}
 							/>
@@ -79,7 +81,7 @@
 						type="button"
 						class="py-0.5 text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
 						on:click={() => {
-							selectedToolIds = [];
+							selectedMcpServerIds = [];
 						}}
 					>
 						{$i18n.t('Disable all')}

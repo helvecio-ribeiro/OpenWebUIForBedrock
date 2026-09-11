@@ -4,7 +4,9 @@
 
 Make standard MCP integration the only source of model-callable tools in Lambda WebUI. Remove the older database-backed Python Tools, Functions, Filters, Actions, Pipes, Pipelines, OpenAPI tool servers, and Valves while retaining the generic provider tool-call engine required by MCP.
 
-The central architectural issue is that MCP and the legacy systems currently share `/api/v1/tools`, `selectedToolIds`, and the `tool_ids` chat request field. These paths must be separated before legacy code can be deleted safely.
+The original architectural issue was that MCP and the legacy systems shared `/api/v1/tools`,
+`selectedToolIds`, and the `tool_ids` chat request field. Stages 1–4 separated those contracts and
+removed the database-backed Python Tool implementation.
 
 ## Required MCP Architecture
 
@@ -24,7 +26,25 @@ Generic internal and provider-facing code may continue to use the word `tool`, b
 
 ## Implementation Stages
 
-### 1. Create a dedicated MCP catalog
+### Completed first pass: legacy frontend removal
+
+The first cleanup pass removes the user-facing legacy tooling surfaces while leaving the shared
+backend execution contract in place for the later endpoint migration:
+
+- Removed the Functions administration routes and editors.
+- Removed the Pipelines administration settings page.
+- Removed Valves from chat controls, model controls, integration menus, and group permissions.
+- Removed legacy Filters and Actions from model editing and chat selection.
+- Removed per-user OpenAPI tool-server settings.
+- Restricted chat and model tool selectors to MCP catalog entries.
+- Restricted external server administration to MCP connections.
+- Simplified the connection editor to MCP Streamable HTTP only; removed dormant OpenAPI spec,
+  JSON import/export, alternate-type, and direct OpenAPI paths.
+
+The remaining stages below separate and then remove the legacy backend. They intentionally preserve
+the generic provider tool-call loop used to execute MCP tools.
+
+### 1. Create a dedicated MCP catalog — completed
 
 Add an endpoint such as:
 
@@ -32,7 +52,7 @@ Add an endpoint such as:
 GET /api/v1/mcp/servers
 ```
 
-It should return only enabled MCP connections, including:
+The endpoint returns the user-visible MCP inventory, including:
 
 - Configured remote MCP servers.
 - Managed local MCP servers.
@@ -40,7 +60,17 @@ It should return only enabled MCP connections, including:
 - Access-control information.
 - Display name and description.
 
-Move the MCP-specific catalog behavior currently mixed into `backend/open_webui/routers/tools.py` into this endpoint.
+The catalog now merges configured remote MCP connections with every registered local managed MCP
+service. Configured connections win an ID collision. Disabled, stopped, and failed services remain
+visible in the raw catalog with `selectable: false`, while the frontend compatibility adapter only
+offers selectable services. This keeps discovery/lifecycle state separate from chat selection.
+
+The response is deliberately secret-free: connection URLs, headers, bearer keys, runtime tokens,
+OAuth tokens, environment values, and package paths are not returned. Chat requests use raw MCP
+server IDs through `mcp_server_ids`.
+
+All normal frontend MCP catalog consumers use this endpoint. Stage 4 removed the old mixed
+`/api/v1/tools` catalog and its database-backed Python Tool implementation.
 
 Verification:
 
@@ -48,13 +78,13 @@ Verification:
 - Discover, Add, Remove, Start, and Stop continue working.
 - OAuth-enabled remote MCP servers retain their authentication status.
 
-### 2. Give MCP its own request contract
+### 2. Give MCP its own request contract — completed
 
 Replace the mixed request representation:
 
 ```json
 {
-  "tool_ids": ["server:mcp:local-calendar"]
+	"tool_ids": ["server:mcp:local-calendar"]
 }
 ```
 
@@ -62,7 +92,7 @@ with:
 
 ```json
 {
-  "mcp_server_ids": ["local-calendar"]
+	"mcp_server_ids": ["local-calendar"]
 }
 ```
 
@@ -73,7 +103,10 @@ selectedToolIds -> selectedMcpServerIds
 settings.tools  -> settings.mcpServerIds
 ```
 
-Provide a one-time compatibility read that migrates existing `server:mcp:*` selections, then remove the old value.
+The frontend catalog, persisted user settings, model defaults, normal chats, channels, automations,
+timers, and delegated/background continuations now use raw MCP server IDs.
+Requests with no selected MCPs omit `mcp_server_ids` and continue normally. The backend validates,
+trims, and de-duplicates explicit selections and returns bounded errors for unavailable services.
 
 Verification:
 
@@ -81,7 +114,7 @@ Verification:
 - Enabling a service affects the next message immediately.
 - Missing or stopped servers return a bounded, useful error.
 
-### 3. Reduce the backend resolver to MCP
+### 3. Reduce the backend resolver to MCP — completed
 
 Refactor the server-side resolution path in `backend/open_webui/utils/middleware.py` so it:
 
@@ -101,9 +134,11 @@ Verification:
 - Nova, Ollama, and other selected models receive valid tool schemas.
 - MCP clients close after success, failure, and cancellation.
 
-Steps 1 through 3 form the first delivery checkpoint. Run a manual Calendar and System Tools regression before beginning destructive removal.
+Steps 1 through 3 form the first delivery checkpoint. The Calendar and System Tools manual
+regression passed after correcting MCP selection persistence and ensuring MCP schemas are merged
+without a legacy `tool_ids` value.
 
-### 4. Remove database-backed Python Tools
+### 4. Remove database-backed Python Tools — completed
 
 Remove:
 
@@ -122,7 +157,18 @@ Primary affected files:
 - `backend/open_webui/utils/plugin.py`
 - `src/lib/apis/tools/`
 
-### 5. Remove Functions, Filters, Pipes, Actions, and function Events
+Completion notes:
+
+- Removed the Tool ORM, CRUD router, dynamic Tool loader/cache, client API, sharing permissions,
+  and admin preview sections.
+- Removed the legacy `/api/v1/tools` route and `tool_ids` request contract; MCP selection now uses
+  `/api/v1/mcp/servers` and `mcp_server_ids` exclusively.
+- Removed legacy `server:mcp:*` migration aliases from chat/model settings and renamed live selection
+  state to `selectedMcpServerIds`.
+- Added an intentionally irreversible migration that deletes Tool access grants and drops the `tool`
+  table. The generic provider tool-call engine remains because MCP execution depends on it.
+
+### 5. Remove Functions, Filters, Pipes, Actions, and function Events — frontend complete, backend pending
 
 Remove:
 
@@ -147,6 +193,10 @@ Primary affected files:
 
 Browser Panel Actions such as Explain Text, Find Bias, Challenge Text, and Summarize Page must remain. They are unrelated direct model requests despite sharing the word `Action`.
 
+Current status: the Functions administration routes/editors and the legacy Filters/Actions selection
+surfaces have been removed from the frontend. `ENABLE_PLUGINS` and remaining backend compatibility
+paths stay until their runtime callers and persistence can be removed together.
+
 ### 6. Remove legacy Pipelines
 
 Remove:
@@ -160,7 +210,7 @@ Remove:
 
 Update all callers in `tasks.py`, `utils/chat.py`, and `utils/middleware.py`.
 
-### 7. Remove OpenAPI tool servers
+### 7. Remove OpenAPI tool servers — frontend complete, backend audit pending
 
 Make server connections MCP-only:
 
@@ -173,7 +223,11 @@ Make server connections MCP-only:
 
 After stabilization, rename generic `tool_server.connections` configuration to an MCP-specific name and provide a one-time migration.
 
-### 8. Remove Valves
+Current status: connection administration and selection are MCP-only, and the editor accepts
+Streamable HTTP MCP configuration only. Audit and remove residual backend OpenAPI conversion code
+before renaming persisted connection configuration.
+
+### 8. Remove Valves — frontend complete, backend audit pending
 
 Once the legacy extension systems have been removed, Valves becomes genuinely dead. Remove:
 
@@ -185,6 +239,10 @@ Once the legacy extension systems have been removed, Valves becomes genuinely de
 - ORM fields and methods.
 - Valves event definitions.
 - Runtime Valves and UserValves injection.
+
+Current status: Valves controls, modals, client APIs, permissions, and administration surfaces have
+been removed from the live frontend. Residual backend references must be removed with the Functions
+and Pipelines runtime paths rather than treated as user-facing supported behavior.
 
 ### 9. Retire native built-in tool injection
 

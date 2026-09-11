@@ -1078,10 +1078,10 @@ async def model_response_handler(request, channel, message, user, db=None):
                 from open_webui.utils.automations import (
                     _resolve_model_features,
                     _resolve_model_filter_ids,
-                    _resolve_model_tool_ids,
+                    _resolve_model_mcp_server_ids,
                 )
 
-                tool_ids = _resolve_model_tool_ids(request.app, model_id)
+                mcp_server_ids = _resolve_model_mcp_server_ids(request.app, model_id)
                 features = await _resolve_model_features(request.app, model_id)
                 filter_ids = _resolve_model_filter_ids(request.app, model_id)
 
@@ -1103,8 +1103,8 @@ async def model_response_handler(request, channel, message, user, db=None):
                 }
                 if files:
                     form_data['files'] = files
-                if tool_ids:
-                    form_data['tool_ids'] = tool_ids
+                if mcp_server_ids:
+                    form_data['mcp_server_ids'] = mcp_server_ids
                 if features:
                     form_data['features'] = features
                 if filter_ids:

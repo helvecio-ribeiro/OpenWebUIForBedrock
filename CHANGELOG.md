@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Lambda WebUI release candidate
+
+### Added
+
+- Added an administrator-only Global System Prompt applied to every model request, including chats,
+  Browser Panel Actions, APIs, and background requests.
+- Added MCP-only catalog and request contracts through `GET /api/v1/mcp/servers` and
+  `mcp_server_ids`, with persisted per-user selection across chats.
+- Added explicit **Move to folder** and **No folder** actions to sidebar and active-chat menus.
+
+### Changed
+
+- System prompts now merge at request time in administrator → user → folder order without copying
+  the administrator prompt into user settings or duplicating the user prompt.
+- MCP services selected during a conversation take effect on the next message; no new chat is
+  required. Empty selection produces a normal request with no MCP tool schemas.
+- Voice recognition and TTS playback use the same centered five-bar animation. Exiting Voice Mode
+  waits for the goodbye playback and then closes both Voice Mode and the Controls panel.
+- Model-callable extension selection and connection administration are MCP-only. Browser Panel
+  Actions remain direct model requests and are not legacy Functions or Tools.
+
+### Removed
+
+- Removed the database-backed Python Tools catalog, CRUD API, executable module loader, persistence,
+  sharing controls, and frontend administration paths.
+- Removed legacy Functions, Filters, Actions, Pipelines, OpenAPI-tool, and Valves surfaces from the
+  frontend. Remaining server-side compatibility paths are tracked in `tools_cleanup.md`.
+- Removed native Calendar and Notes implementations; Local Calendar is now an optional standalone
+  managed MCP package with its own shared SQLite repository.
+
+The historical upstream entries below describe the source release this fork began from. Features
+listed there may be intentionally unavailable in Lambda WebUI; consult `README.md` and
+`tools_cleanup.md` for the supported release-candidate surface.
+
 ## [0.11.0] - 2026-07-27
 
 ### Added

@@ -3,7 +3,7 @@
 import pytest
 
 from open_webui.config import DEFAULT_USER_PERMISSIONS
-from open_webui.routers import knowledge, models, prompts, skills, tools, users
+from open_webui.routers import knowledge, models, prompts, skills, users
 from open_webui.utils.auth import get_admin_user
 
 
@@ -24,8 +24,6 @@ def _route_dependency(router, path: str, method: str):
         (models.router, '/import', 'POST'),
         (prompts.router, '/create', 'POST'),
         (knowledge.router, '/create', 'POST'),
-        (tools.router, '/export', 'GET'),
-        (tools.router, '/create', 'POST'),
         (skills.router, '/export', 'GET'),
         (skills.router, '/create', 'POST'),
     ],

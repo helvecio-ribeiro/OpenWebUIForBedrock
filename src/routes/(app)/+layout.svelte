@@ -10,7 +10,7 @@
 	import { fade } from 'svelte/transition';
 
 	import { getModels, getToolServersData, getVersionUpdates } from '$lib/apis';
-	import { getTools } from '$lib/apis/tools';
+	import { getMCPTools } from '$lib/apis/mcp';
 	import { getBanners } from '$lib/apis/configs';
 	import { getTerminalServers } from '$lib/apis/terminal';
 	import { getUserSettings } from '$lib/apis/users';
@@ -26,7 +26,6 @@
 		models,
 		knowledge,
 		tools,
-		functions,
 		tags,
 		banners,
 		showSettings,
@@ -218,8 +217,14 @@
 	};
 
 	const setTools = async () => {
-		const toolsData = await getTools(localStorage.token);
-		tools.set(toolsData);
+		try {
+			const toolsData = await getMCPTools(localStorage.token);
+			tools.set(toolsData);
+		} catch (error) {
+			// A transient catalog failure must not erase a previously usable selection.
+			console.error('Failed to load MCP catalog', error);
+			throw error;
+		}
 	};
 
 	const openSettingsFromUrl = async () => {

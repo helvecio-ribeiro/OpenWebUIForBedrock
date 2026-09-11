@@ -1,35 +1,31 @@
 <script lang="ts">
-	import { getContext, tick } from 'svelte';
+	import { getContext } from 'svelte';
 	const i18n = getContext('i18n');
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Switch from '$lib/components/common/Switch.svelte';
-	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import Cog6 from '$lib/components/icons/Cog6.svelte';
 	import AddToolServerModal from '$lib/components/AddToolServerModal.svelte';
 	import WrenchAlt from '$lib/components/icons/WrenchAlt.svelte';
 
 	export let onDelete = () => {};
 	export let onSubmit = () => {};
-
 	export let connection = null;
-	export let direct = false;
 
 	let showConfigModal = false;
 </script>
 
 <AddToolServerModal
 	edit
-	{direct}
 	bind:show={showConfigModal}
 	{connection}
 	onDelete={() => {
 		onDelete();
 		showConfigModal = false;
 	}}
-	onSubmit={(c) => {
-		connection = c;
-		onSubmit(c);
+	onSubmit={(updatedConnection) => {
+		connection = updatedConnection;
+		onSubmit(updatedConnection);
 	}}
 />
 
@@ -41,19 +37,14 @@
 					? 'opacity-50'
 					: ''}"
 			>
-				<Tooltip content={connection?.type === 'mcp' ? $i18n.t('MCP') : $i18n.t('OpenAPI')}>
-					<WrenchAlt />
-				</Tooltip>
-
+				<Tooltip content={$i18n.t('MCP')}><WrenchAlt /></Tooltip>
 				{#if connection?.info?.name}
 					<div class="w-full bg-transparent capitalize outline-hidden">
-						{connection?.info?.name ?? connection?.url}
+						{connection.info.name}
 						<span class="text-gray-500">{connection?.info?.id ?? ''}</span>
 					</div>
 				{:else}
-					<div>
-						{connection?.url}
-					</div>
+					<div>{connection?.url}</div>
 				{/if}
 			</div>
 		</div>
@@ -63,9 +54,7 @@
 		<Tooltip content={$i18n.t('Configure')} className="self-start">
 			<button
 				class="flex size-6 items-center justify-center rounded-lg text-gray-400 transition-colors hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300"
-				on:click={() => {
-					showConfigModal = true;
-				}}
+				on:click={() => (showConfigModal = true)}
 				type="button"
 			>
 				<Cog6 />

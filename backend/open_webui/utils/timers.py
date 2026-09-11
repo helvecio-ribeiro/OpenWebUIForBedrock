@@ -106,7 +106,7 @@ async def create_timer(
     run = {
         'model_id': model_id,
         'session_id': metadata.get('session_id'),
-        'tool_ids': copy.deepcopy(metadata.get('tool_ids') or []),
+        'mcp_server_ids': copy.deepcopy(metadata.get('mcp_server_ids') or []),
         'skill_ids': copy.deepcopy(metadata.get('skill_ids') or []),
         'system_prompt': metadata.get('system_prompt'),
         'filter_ids': copy.deepcopy(metadata.get('filter_ids') or []),
@@ -380,7 +380,7 @@ async def execute_due_timer(app, timer_id: str, claim_id: str | None = None) -> 
             'user_message': user_message,
             'session_id': run.get('session_id') or f'timer:{parent_chat_id}',
             'background_tasks': {},
-            'tool_ids': run.get('tool_ids') or [],
+            'mcp_server_ids': run.get('mcp_server_ids') or [],
             'skill_ids': run.get('skill_ids') or [],
             'filter_ids': run.get('filter_ids') or [],
             'features': run.get('features') or {},

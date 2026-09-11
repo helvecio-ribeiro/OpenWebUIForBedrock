@@ -22,14 +22,12 @@
 	import Personalization from './Settings/Personalization.svelte';
 	import Search from '../icons/Search.svelte';
 	import Connections from './Settings/Connections.svelte';
-	import Integrations from './Settings/Integrations.svelte';
 	import DatabaseSettings from '../icons/DatabaseSettings.svelte';
 	import SettingsAlt from '../icons/SettingsAlt.svelte';
 	import Link from '../icons/Link.svelte';
 	import UserCircle from '../icons/UserCircle.svelte';
 	import SoundHigh from '../icons/SoundHigh.svelte';
 	import InfoCircle from '../icons/InfoCircle.svelte';
-	import WrenchAlt from '../icons/WrenchAlt.svelte';
 	import Face from '../icons/Face.svelte';
 	import AppNotification from '../icons/AppNotification.svelte';
 	import AdjustmentsHorizontal from '../icons/AdjustmentsHorizontal.svelte';
@@ -52,7 +50,6 @@
 	import AdminInterface from '$lib/components/admin/Settings/Interface.svelte';
 	import AdminAudio from '$lib/components/admin/Settings/Audio.svelte';
 	import AdminImages from '$lib/components/admin/Settings/Images.svelte';
-	import AdminPipelines from '$lib/components/admin/Settings/Pipelines.svelte';
 	import AdminDatabase from '$lib/components/admin/Settings/Database.svelte';
 
 	const i18n: Writable<any> = getContext('i18n');
@@ -106,7 +103,6 @@
 		notifications: 'Basics',
 		shortcuts: 'Basics',
 		connections: 'Services',
-		tools: 'Services',
 		personalization: 'Preferences',
 		audio: 'Preferences',
 		data_controls: 'Data',
@@ -127,7 +123,6 @@
 		'admin:documents': 'Tools',
 		'admin:web': 'Tools',
 		'admin:code-execution': 'Tools',
-		'admin:pipelines': 'Tools',
 		'admin:interface': 'Experience',
 		'admin:audio': 'Experience',
 		'admin:images': 'Experience',
@@ -350,24 +345,6 @@
 				'settings'
 			]
 		},
-		{
-			id: 'tools',
-			title: 'Integrations',
-			keywords: [
-				'addconnection',
-				'add connection',
-				'integrations',
-				'managetools',
-				'manage tools',
-				'manage tool servers',
-				'managetoolservers',
-				'open terminal',
-				'openterminal',
-				'terminal',
-				'settings'
-			]
-		},
-
 		{
 			id: 'personalization',
 			title: 'Personalization',
@@ -720,7 +697,7 @@
 		{
 			id: 'admin:integrations',
 			title: 'Integrations',
-			keywords: ['tools', 'integrations', 'plugins', 'extensions', 'functions', 'openapi', 'server']
+			keywords: ['mcp', 'tools', 'integrations', 'servers']
 		},
 		{
 			id: 'admin:documents',
@@ -737,12 +714,6 @@
 			title: 'Code Execution',
 			keywords: ['code execution', 'python', 'sandbox', 'compiler', 'jupyter', 'interpreter']
 		},
-		{
-			id: 'admin:pipelines',
-			title: 'Pipelines',
-			keywords: ['pipelines', 'workflows', 'filters', 'valves', 'middleware']
-		},
-
 		{
 			id: 'admin:db',
 			title: 'Database',
@@ -1005,21 +976,6 @@
 								<span>{$i18n.t('Connections')}</span>
 							</button>
 						{/if}
-					{:else if tabId === 'tools'}
-						{#if $user?.role === 'admin' || ($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers)}
-							<button
-								role="tab"
-								aria-controls="tab-tools"
-								aria-selected={selectedTab === 'tools'}
-								class={tabButtonClass(selectedTab === 'tools')}
-								on:click={() => {
-									selectedTab = 'tools';
-								}}
-							>
-								<WrenchAlt className="size-3.5" strokeWidth="2" />
-								<span>{$i18n.t('Integrations')}</span>
-							</button>
-						{/if}
 					{:else if tabId === 'personalization'}
 						<button
 							role="tab"
@@ -1184,13 +1140,6 @@
 						toast.success($i18n.t('Settings saved successfully!'));
 					}}
 				/>
-			{:else if selectedTab === 'tools'}
-				<Integrations
-					saveSettings={async (updated: Record<string, any>) => {
-						await saveSettings(updated);
-						toast.success($i18n.t('Settings saved successfully!'));
-					}}
-				/>
 			{:else if selectedTab === 'personalization'}
 				<Personalization
 					{saveSettings}
@@ -1265,12 +1214,6 @@
 				/>
 			{:else if selectedTab === 'admin:db'}
 				<AdminDatabase
-					saveHandler={() => {
-						toast.success($i18n.t('Settings saved successfully!'));
-					}}
-				/>
-			{:else if selectedTab === 'admin:pipelines'}
-				<AdminPipelines
 					saveHandler={() => {
 						toast.success($i18n.t('Settings saved successfully!'));
 					}}

@@ -73,7 +73,6 @@ export const activeChatModelIds: Writable<string[]> = writable([]);
 export const knowledge: Writable<null | Document[]> = writable(null);
 export const tools = writable(null);
 export const skills = writable(null);
-export const functions = writable(null);
 
 export const adminUserCount: Writable<number | null> = writable(null);
 export const adminGroupCount: Writable<number | null> = writable(null);
@@ -188,7 +187,6 @@ type OllamaModelDetails = {
 
 type Settings = {
 	pinnedModels?: never[];
-	tools?: string[];
 	toolServers?: never[];
 	detectArtifacts?: boolean;
 	showUpdateToast?: boolean;

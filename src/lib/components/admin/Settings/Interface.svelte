@@ -35,7 +35,6 @@
 		ENABLE_SEARCH_QUERY_GENERATION: true,
 		ENABLE_RETRIEVAL_QUERY_GENERATION: true,
 		QUERY_GENERATION_PROMPT_TEMPLATE: '',
-		TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE: '',
 		ENABLE_VOICE_MODE_PROMPT: true,
 		VOICE_MODE_PROMPT_TEMPLATE: ''
 	};
@@ -491,17 +490,6 @@
 					<Textarea
 						className={textareaClass}
 						bind:value={taskConfig.IMAGE_PROMPT_GENERATION_PROMPT_TEMPLATE}
-						placeholder={$i18n.t('Leave empty to use the default prompt, or enter a custom prompt')}
-					/>
-				</AdminSettingField>
-
-				<AdminSettingField
-					label={$i18n.t('Tools Function Calling Prompt')}
-					description={$i18n.t('Guides how the assistant formats tool and function calls.')}
-				>
-					<Textarea
-						className={textareaClass}
-						bind:value={taskConfig.TOOLS_FUNCTION_CALLING_PROMPT_TEMPLATE}
 						placeholder={$i18n.t('Leave empty to use the default prompt, or enter a custom prompt')}
 					/>
 				</AdminSettingField>

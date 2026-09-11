@@ -35,7 +35,6 @@
 		// Advanced
 		stream_response: true,
 		stream_delta_chunk_size: 1,
-		function_calling: null,
 		reasoning_tags: null,
 		seed: null,
 		temperature: null,
@@ -73,7 +72,6 @@
 				stream_response: params.stream_response !== null ? params.stream_response : undefined,
 				stream_delta_chunk_size:
 					params.stream_delta_chunk_size !== null ? params.stream_delta_chunk_size : undefined,
-				function_calling: params.function_calling !== null ? params.function_calling : undefined,
 				reasoning_tags: params.reasoning_tags !== null ? params.reasoning_tags : undefined,
 				seed: (params.seed !== null ? params.seed : undefined) ?? undefined,
 				stop: params.stop ? params.stop.split(',').filter((e) => e) : undefined,
@@ -259,7 +257,11 @@
 
 		{#if $user?.role === 'admin' || (($user?.permissions.chat?.controls ?? true) && ($user?.permissions.chat?.system_prompt ?? true))}
 			<UserSettingSection title={$i18n.t('System Prompt')}>
-				<UserSettingField description={$i18n.t('Set the default system prompt for new chats.')}>
+				<UserSettingField
+					description={$i18n.t(
+						'Set your system prompt for new chats. Administrator instructions are applied separately before this prompt.'
+					)}
+				>
 					<Textarea
 						bind:value={system}
 						className={systemPromptTextareaClass}

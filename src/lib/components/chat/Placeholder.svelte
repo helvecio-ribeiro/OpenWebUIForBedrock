@@ -44,7 +44,7 @@
 	export let files = [];
 	export let messageInput = null;
 
-	export let selectedToolIds = [];
+	export let selectedMcpServerIds = [];
 	export let selectedSkillIds = [];
 	export let selectedFilterIds = [];
 	export let pendingOAuthTools = [];
@@ -128,9 +128,9 @@
 											selectedModelIdx = modelIdx;
 										}}
 									>
-						<img
-							src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
-							alt=""
+										<img
+											src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
+											alt=""
 											class=" size-9 @sm:size-10 rounded-2xl"
 											aria-hidden="true"
 											draggable="false"
@@ -221,7 +221,7 @@
 						bind:files
 						bind:prompt
 						bind:autoScroll
-						bind:selectedToolIds
+						bind:selectedMcpServerIds
 						bind:selectedSkillIds
 						bind:selectedFilterIds
 						bind:imageGenerationEnabled

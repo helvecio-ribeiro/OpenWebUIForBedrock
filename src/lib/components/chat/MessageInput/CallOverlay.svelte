@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { config, models, settings, showCallOverlay, TTSWorker } from '$lib/stores';
+	import { config, models, settings, showCallOverlay, showControls, TTSWorker } from '$lib/stores';
 	import { onMount, tick, getContext, onDestroy, createEventDispatcher } from 'svelte';
 
 	const dispatch = createEventDispatcher();
@@ -16,7 +16,6 @@
 	import VideoInputMenu from './CallOverlay/VideoInputMenu.svelte';
 	import AudioWaveform from './CallOverlay/AudioWaveform.svelte';
 	import { KokoroWorker } from '$lib/workers/KokoroWorker';
-	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	const i18n = getContext('i18n');
 
@@ -37,6 +36,7 @@
 	let assistantSpeaking = false;
 	let ttsPlaying = false;
 	let playbackLevels = Array(5).fill(0.1);
+	let microphoneLevels = Array(5).fill(0.1);
 	let muted = false;
 	let exitAfterPlayback = false;
 
@@ -54,6 +54,12 @@
 	let audioContainerHeader: Blob | null = null;
 	let microphoneAudioContext: AudioContext | null = null;
 	let microphoneAnimationFrame: number | null = null;
+
+	const closeVoiceMode = () => {
+		showCallOverlay.set(false);
+		showControls.set(false);
+		dispatch('close');
+	};
 
 	let videoInputDevices = [];
 	let selectedVideoInputDeviceId = null;
@@ -191,39 +197,39 @@
 		if (res) {
 			console.log(res.text);
 
-				if (res.text !== '') {
-					const exiting = isVoiceExitCommand(res.text);
-					if (exiting) {
-						muted = true;
-						hasStartedSpeaking = false;
-						confirmed = false;
-						audioChunks = [];
-						audioPreRollChunks = [];
-						assistantSpeaking = true;
-						loading = false;
+			if (res.text !== '') {
+				const exiting = isVoiceExitCommand(res.text);
+				if (exiting) {
+					muted = true;
+					hasStartedSpeaking = false;
+					confirmed = false;
+					audioChunks = [];
+					audioPreRollChunks = [];
+					assistantSpeaking = true;
+					loading = false;
 
-						// Exit is a client control command, not a model prompt. Speak a fixed
-						// acknowledgement, wait for it to finish, and then close Voice Mode.
-						const exitMessageId = `voice-control-exit-${Date.now()}`;
-						audioAbortController?.abort();
-						audioAbortController = new AbortController();
-						playbackQueues[exitMessageId] = Promise.resolve(true);
-						try {
-							await enqueueAudio(
-								exitMessageId,
-								VOICE_EXIT_ACKNOWLEDGEMENT,
-								audioAbortController.signal
-							);
-						} finally {
-							delete playbackQueues[exitMessageId];
-							assistantSpeaking = false;
-							$showCallOverlay = false;
-						}
-						return;
+					// Exit is a client control command, not a model prompt. Speak a fixed
+					// acknowledgement, wait for it to finish, and then close Voice Mode.
+					const exitMessageId = `voice-control-exit-${Date.now()}`;
+					audioAbortController?.abort();
+					audioAbortController = new AbortController();
+					playbackQueues[exitMessageId] = Promise.resolve(true);
+					try {
+						await enqueueAudio(
+							exitMessageId,
+							VOICE_EXIT_ACKNOWLEDGEMENT,
+							audioAbortController.signal
+						);
+					} finally {
+						delete playbackQueues[exitMessageId];
+						assistantSpeaking = false;
+						closeVoiceMode();
 					}
+					return;
+				}
 
-					const _responses = await submitPrompt(res.text, []);
-					console.log(_responses);
+				const _responses = await submitPrompt(res.text, []);
+				console.log(_responses);
 			}
 		}
 	};
@@ -423,6 +429,14 @@
 				if (muted || (assistantSpeaking && !($settings?.voiceInterruption ?? false))) {
 					rmsLevel = 0;
 				}
+				const visualLevel = Math.min(1, rmsLevel / 0.12);
+				microphoneLevels = [
+					visualLevel,
+					visualLevel * 0.82,
+					visualLevel * 0.64,
+					visualLevel * 0.48,
+					visualLevel * 0.34
+				];
 
 				const now = performance.now();
 				if (now - listeningStartedAt < LISTENING_GRACE_MS) {
@@ -865,7 +879,7 @@
 			if (!completed) console.error(`TTS playback failed for message ID ${id}`);
 			if (exitAfterPlayback) {
 				exitAfterPlayback = false;
-				$showCallOverlay = false;
+				closeVoiceMode();
 			} else {
 				await restoreListeningState();
 			}
@@ -1060,16 +1074,7 @@
 						/><circle class="spinner_qM83 spinner_ZTLf" cx="20" cy="12" r="3" /></svg
 					>
 				{:else}
-					<div
-						class=" {rmsLevel * 100 > 4
-							? ' size-[4.5rem]'
-							: rmsLevel * 100 > 2
-								? ' size-16'
-								: rmsLevel * 100 > 1
-									? 'size-14'
-									: 'size-12'}  transition-all rounded-full bg-cover bg-center bg-no-repeat"
-						style={`background-image: url('${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}&voice=true');`}
-					></div>
+					<AudioWaveform levels={microphoneLevels} compact />
 				{/if}
 				<!-- navbar -->
 			</button>
@@ -1138,16 +1143,7 @@
 							/><circle class="spinner_qM83 spinner_ZTLf" cx="20" cy="12" r="3" /></svg
 						>
 					{:else}
-						<div
-							class=" {rmsLevel * 100 > 4
-								? ' size-52'
-								: rmsLevel * 100 > 2
-									? 'size-48'
-									: rmsLevel * 100 > 1
-										? 'size-44'
-										: 'size-40'} transition-all rounded-full bg-cover bg-center bg-no-repeat"
-							style={`background-image: url('${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}&voice=true');`}
-						></div>
+						<AudioWaveform levels={microphoneLevels} />
 					{/if}
 				</button>
 			{:else}
@@ -1157,7 +1153,8 @@
 						id="camera-feed"
 						autoplay
 						class="rounded-2xl h-full min-w-full object-cover object-center"
-						playsinline></video>
+						playsinline
+					></video>
 
 					<canvas id="camera-canvas" style="display:none;"></canvas>
 
@@ -1338,8 +1335,7 @@
 						console.log(audioStream);
 						console.log(cameraStream);
 
-						showCallOverlay.set(false);
-						dispatch('close');
+						closeVoiceMode();
 					}}
 					type="button"
 				>

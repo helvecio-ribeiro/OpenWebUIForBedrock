@@ -2047,7 +2047,7 @@ class ChatTable:
             return [ChatModel.model_validate(chat) for chat in all_chats]
 
     async def update_chat_folder_id_by_id_and_user_id(
-        self, id: str, user_id: str, folder_id: str, db: AsyncSession | None = None
+        self, id: str, user_id: str, folder_id: str | None, db: AsyncSession | None = None
     ) -> ChatModel | None:
         try:
             async with get_async_db_context(db) as session:

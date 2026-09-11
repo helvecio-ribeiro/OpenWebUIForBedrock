@@ -2,26 +2,16 @@
 	import { getContext, onMount, tick } from 'svelte';
 	import { fly } from 'svelte/transition';
 
-	import {
-		config,
-		user,
-		tools as _tools,
-		skills as _skills,
-		mobile,
-		settings,
-		toolServers,
-		terminalServers
-	} from '$lib/stores';
+	import { user, tools as _tools, skills as _skills, settings } from '$lib/stores';
 
 	import { initiateOAuthRedirect } from '$lib/apis/configs';
 	import { deleteOAuthSession } from '$lib/apis/auths';
-	import { getTools } from '$lib/apis/tools';
+	import { getMCPTools } from '$lib/apis/mcp';
 	import { getSkills } from '$lib/apis/skills';
 	import { updateUserSettings } from '$lib/apis/users';
 
 	import { toast } from 'svelte-sonner';
 
-	import Knobs from '$lib/components/icons/Knobs.svelte';
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import DropdownMenu from '$lib/components/common/DropdownMenu.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -29,7 +19,6 @@
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Wrench from '$lib/components/icons/Wrench.svelte';
 	import Cube from '$lib/components/icons/Cube.svelte';
-	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import Photo from '$lib/components/icons/Photo.svelte';
 	import Terminal from '$lib/components/icons/Terminal.svelte';
@@ -39,15 +28,11 @@
 
 	const i18n = getContext('i18n');
 
-	export let selectedToolIds: string[] = [];
+	export let selectedMcpServerIds: string[] = [];
 	export let selectedSkillIds: string[] = [];
 
 	export let selectedModels: string[] = [];
 	export let fileUploadCapableModels: string[] = [];
-
-	export let toggleFilters: { id: string; name: string; description?: string; icon?: string }[] =
-		[];
-	export let selectedFilterIds: string[] = [];
 
 	export let showWebSearchButton = false;
 	export let webSearchEnabled = false;
@@ -56,7 +41,6 @@
 	export let showCodeInterpreterButton = false;
 	export let codeInterpreterEnabled = false;
 
-	export let onShowValves: Function;
 	export let onClose: Function;
 	export let onWebSearchToggle: Function = () => {};
 	// svelte-ignore export_let_unused\n	export let closeOnOutsideClick = true;
@@ -70,12 +54,12 @@
 	const persistSelectedTools = async () => {
 		const uiSettings = {
 			...$settings,
-			tools: [...new Set(selectedToolIds)]
+			mcpServerIds: [...new Set(selectedMcpServerIds)]
 		};
 		settings.set(uiSettings);
 
 		await updateUserSettings(localStorage.token, { ui: uiSettings }).catch((err) => {
-			console.error('Failed to persist selected tools', err);
+			console.error('Failed to persist selected MCP servers', err);
 			toast.error($i18n.t('Failed to save tool selection'));
 		});
 	};
@@ -90,36 +74,24 @@
 		($user?.role === 'admin' || $user?.permissions?.chat?.file_upload);
 
 	const init = async () => {
-		if ($_tools === null) {
-			await _tools.set(await getTools(localStorage.token));
+		if ($_tools === null || $_tools.length === 0) {
+			const catalog = await getMCPTools(localStorage.token);
+			if (catalog.length > 0) await _tools.set(catalog);
 		}
 
 		if ($_tools) {
-			tools = $_tools.reduce((a, tool, i, arr) => {
+			tools = $_tools.reduce((a, tool) => {
 				a[tool.id] = {
 					name: tool.name,
 					description: tool.meta.description,
-					enabled: selectedToolIds.includes(tool.id),
+					enabled: selectedMcpServerIds.includes(tool.id),
 					...tool
 				};
 				return a;
 			}, {});
 		}
 
-		if ($toolServers) {
-			for (const serverIdx in $toolServers) {
-				const server = $toolServers[serverIdx];
-				if (server.info) {
-					tools[`direct_server:${serverIdx}`] = {
-						name: server?.info?.title ?? server.url,
-						description: server.info.description ?? '',
-						enabled: selectedToolIds.includes(`direct_server:${serverIdx}`)
-					};
-				}
-			}
-		}
-
-		selectedToolIds = selectedToolIds.filter((id) => Object.keys(tools).includes(id));
+		selectedMcpServerIds = selectedMcpServerIds.filter((id) => Object.keys(tools).includes(id));
 
 		if ($_skills === null) {
 			await _skills.set(await getSkills(localStorage.token));
@@ -208,77 +180,6 @@
 						<div class="py-4">
 							<Spinner />
 						</div>
-					{/if}
-
-					{#if toggleFilters && toggleFilters.length > 0}
-						{#each toggleFilters.sort( (a, b) => a.name.localeCompare( b.name, undefined, { sensitivity: 'base' } ) ) as filter, filterIdx (filter.id)}
-							<Tooltip content={filter?.description} placement="top-start">
-								<button
-									class="flex w-full justify-between gap-2 items-center h-[1.6875rem] px-2 text-[13px] font-normal cursor-pointer rounded-xl hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
-									on:click={() => {
-										if (selectedFilterIds.includes(filter.id)) {
-											selectedFilterIds = selectedFilterIds.filter((id) => id !== filter.id);
-										} else {
-											selectedFilterIds = [...selectedFilterIds, filter.id];
-										}
-									}}
-								>
-									<div class="flex-1 truncate">
-										<div class="flex flex-1 gap-2 items-center">
-											<div class="shrink-0">
-												{#if filter?.icon}
-													<div class="size-3.5 items-center flex justify-center">
-														<img
-															src={filter.icon}
-															class="size-3.5 {filter.icon.includes('data:image/svg')
-																? 'dark:invert-[80%]'
-																: ''}"
-															style="fill: currentColor;"
-															alt={filter.name}
-														/>
-													</div>
-												{:else}
-													<Sparkles className="size-3.5" strokeWidth="1.75" />
-												{/if}
-											</div>
-
-											<div class=" truncate">{filter?.name}</div>
-										</div>
-									</div>
-
-									{#if filter?.has_user_valves && ($user?.role === 'admin' || ($user?.permissions?.chat?.valves ?? true))}
-										<div class=" shrink-0">
-											<Tooltip content={$i18n.t('Valves')}>
-												<button
-													class="self-center w-fit text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition rounded-full"
-													type="button"
-													on:click={(e) => {
-														e.stopPropagation();
-														e.preventDefault();
-														onShowValves({
-															type: 'function',
-															id: filter.id
-														});
-													}}
-												>
-													<Knobs />
-												</button>
-											</Tooltip>
-										</div>
-									{/if}
-
-									<div class=" shrink-0">
-										<Switch
-											state={selectedFilterIds.includes(filter.id)}
-											on:change={async (e) => {
-												const state = e.detail;
-												await tick();
-											}}
-										/>
-									</div>
-								</button>
-							</Tooltip>
-						{/each}
 					{/if}
 
 					{#if showWebSearchButton}
@@ -412,12 +313,10 @@
 								if (!(tools[toolId]?.authenticated ?? true)) {
 									e.preventDefault();
 
-									const parts = toolId.split(':');
 									initiateOAuthRedirect({
 										id: toolId,
-										serverId: parts.at(-1) ?? toolId,
-										authType:
-											parts.length > 1 ? (parts[0] === 'server' ? parts[1] : parts[0]) : null
+										serverId: toolId,
+										authType: 'mcp'
 									});
 								} else {
 									tools[toolId].enabled = !tools[toolId].enabled;
@@ -426,9 +325,9 @@
 									await tick();
 
 									if (state) {
-										selectedToolIds = [...selectedToolIds, toolId];
+										selectedMcpServerIds = [...selectedMcpServerIds, toolId];
 									} else {
-										selectedToolIds = selectedToolIds.filter((id) => id !== toolId);
+										selectedMcpServerIds = selectedMcpServerIds.filter((id) => id !== toolId);
 									}
 									await persistSelectedTools();
 								}
@@ -451,7 +350,7 @@
 								</div>
 							</div>
 
-							{#if (tools[toolId]?.authenticated ?? true) && toolId.startsWith('server:mcp:')}
+							{#if tools[toolId]?.authenticated ?? true}
 								<div class="shrink-0">
 									<Tooltip content={$i18n.t('Disconnect OAuth')}>
 										<button
@@ -461,17 +360,15 @@
 												e.stopPropagation();
 												e.preventDefault();
 
-												const parts = toolId.split(':');
-												const serverId = parts.at(-1) ?? toolId;
-												const provider = `mcp:${serverId}`;
+												const provider = `mcp:${toolId}`;
 
 												try {
 													await deleteOAuthSession(localStorage.token, provider);
 													toast.success($i18n.t('OAuth session disconnected'));
 
 													// Refresh tools to update authenticated state
-													_tools.set(await getTools(localStorage.token));
-													selectedToolIds = selectedToolIds.filter((id) => id !== toolId);
+													_tools.set(await getMCPTools(localStorage.token));
+													selectedMcpServerIds = selectedMcpServerIds.filter((id) => id !== toolId);
 													await persistSelectedTools();
 													await init();
 												} catch (err) {
@@ -480,27 +377,6 @@
 											}}
 										>
 											<LinkSlash className="size-3.5" />
-										</button>
-									</Tooltip>
-								</div>
-							{/if}
-
-							{#if tools[toolId]?.has_user_valves && ($user?.role === 'admin' || ($user?.permissions?.chat?.valves ?? true))}
-								<div class=" shrink-0">
-									<Tooltip content={$i18n.t('Valves')}>
-										<button
-											class="self-center w-fit text-sm text-gray-600 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition rounded-full"
-											type="button"
-											on:click={(e) => {
-												e.stopPropagation();
-												e.preventDefault();
-												onShowValves({
-													type: 'tool',
-													id: toolId
-												});
-											}}
-										>
-											<Knobs />
 										</button>
 									</Tooltip>
 								</div>

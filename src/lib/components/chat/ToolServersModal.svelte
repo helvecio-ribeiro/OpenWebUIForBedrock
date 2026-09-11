@@ -7,11 +7,11 @@
 	import XMark from '$lib/components/icons/XMark.svelte';
 
 	export let show = false;
-	export let selectedToolIds = [];
+	export let selectedMcpServerIds = [];
 
 	let selectedTools = [];
 
-	$: selectedTools = ($tools ?? []).filter((tool) => selectedToolIds.includes(tool.id));
+	$: selectedTools = ($tools ?? []).filter((tool) => selectedMcpServerIds.includes(tool.id));
 
 	const i18n = getContext('i18n');
 

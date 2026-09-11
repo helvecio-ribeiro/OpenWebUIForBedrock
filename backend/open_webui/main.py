@@ -158,6 +158,7 @@ from open_webui.routers import (
     groups,
     images,
     knowledge,
+    mcp,
     managed_mcp,
     memories,
     models,
@@ -171,7 +172,6 @@ from open_webui.routers import (
     skills,
     tasks,
     terminals,
-    tools,
     users,
     utils,
     web_panels,
@@ -263,7 +263,7 @@ from open_webui.utils.oauth import (
     recover_static_oauth_client_metadata,
     resolve_oauth_client_info,
 )
-from open_webui.utils.plugin import install_tool_and_function_dependencies
+from open_webui.utils.plugin import install_function_dependencies
 from open_webui.utils.redis import get_redis_client
 from open_webui.utils.security_headers import SecurityHeadersMiddleware
 from open_webui.utils.session_pool import cleanup_response, get_session, stream_wrapper
@@ -363,8 +363,8 @@ async def lifespan(app: FastAPI):
 
     # This should be blocking (sync) so functions are not deactivated on first /get_models calls
     # when the first user lands on the / route.
-    log.info('Installing external dependencies of functions and tools...')
-    await install_tool_and_function_dependencies()
+    log.info('Installing external dependencies of functions...')
+    await install_function_dependencies()
 
     app.state.redis = get_redis_client(async_mode=True)
 
@@ -816,7 +816,7 @@ app.include_router(models.router, prefix='/api/v1/models', tags=['models'])
 app.include_router(notifications.router, prefix='/api/v1/notifications', tags=['notifications'])
 app.include_router(knowledge.router, prefix='/api/v1/knowledge', tags=['knowledge'])
 app.include_router(prompts.router, prefix='/api/v1/prompts', tags=['prompts'])
-app.include_router(tools.router, prefix='/api/v1/tools', tags=['tools'])
+app.include_router(mcp.router, prefix='/api/v1/mcp', tags=['mcp'])
 app.include_router(skills.router, prefix='/api/v1/skills', tags=['skills'])
 
 app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories'])
@@ -1195,7 +1195,7 @@ async def chat_completion(
             'session_id': form_data.pop('session_id', None),
             'folder_id': form_data.pop('folder_id', None),
             'filter_ids': form_data.pop('filter_ids', []),
-            'tool_ids': form_data.get('tool_ids', None),
+            'mcp_server_ids': form_data.get('mcp_server_ids', None),
             'tool_servers': tool_servers,
             'files': form_data.get('files', None),
             'features': form_data.get('features', {}),
@@ -1207,11 +1207,6 @@ async def chat_completion(
                 'stream_delta_chunk_size': stream_delta_chunk_size,
                 'reasoning_tags': reasoning_tags,
                 'compact_token_threshold': compact_token_threshold,
-                'function_calling': (
-                    form_data.get('params', {}).get('function_calling')
-                    or model_info_params.get('function_calling')
-                    or 'native'
-                ),
             },
         }
 
@@ -1694,7 +1689,7 @@ async def chat_completion(
                         {
                             'model_id': metadata.get('model_id') or form_data.get('model'),
                             'session_id': metadata.get('session_id'),
-                            'tool_ids': metadata.get('tool_ids') or [],
+                            'mcp_server_ids': metadata.get('mcp_server_ids') or [],
                             'skill_ids': metadata.get('skill_ids') or [],
                             'system_prompt': metadata.get('system_prompt'),
                             'filter_ids': metadata.get('filter_ids') or [],

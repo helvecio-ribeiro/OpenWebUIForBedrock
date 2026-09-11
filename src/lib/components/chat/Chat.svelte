@@ -40,7 +40,6 @@
 		skills,
 		toolServers,
 		terminalServers,
-		functions,
 		selectedFolder,
 		showEmbeds,
 		selectedTerminalId,
@@ -94,11 +93,10 @@
 		stopTasksByChatId,
 		getTaskIdsByChatId
 	} from '$lib/apis';
-	import { getTools } from '$lib/apis/tools';
+	import { getMCPTools } from '$lib/apis/mcp';
 	import { getSkills } from '$lib/apis/skills';
 	import { uploadFile } from '$lib/apis/files';
 	import { createOpenAITextStream } from '$lib/apis/streaming';
-	import { getFunctions } from '$lib/apis/functions';
 	import { initiateOAuthRedirect } from '$lib/apis/configs';
 	import { updateFolderById } from '$lib/apis/folders';
 
@@ -315,7 +313,7 @@
 	$: contextUsage = getContextUsage() ?? (contextCompactionEnabled ? serverContextUsage : null);
 	$: embeddedHeaderTitle = embeddedTitle || $chatTitle || $i18n.t('Chat');
 
-	let selectedToolIds = [];
+	let selectedMcpServerIds = [];
 	let selectedSkillIds = [];
 	let selectedFilterIds = [];
 	let pendingOAuthTools = [];
@@ -575,7 +573,7 @@
 		messageInput?.setText('');
 
 		files = [];
-		selectedToolIds = [];
+		selectedMcpServerIds = [];
 		selectedSkillIds = [];
 		selectedFilterIds = [];
 		webSearchEnabled = false;
@@ -614,7 +612,7 @@
 					if (!$temporaryChatEnabled) {
 						messageInput?.setText(input.prompt);
 						files = input.files;
-						selectedToolIds = input.selectedToolIds;
+						selectedMcpServerIds = input.selectedMcpServerIds ?? [];
 						selectedSkillIds = input.selectedSkillIds ?? [];
 						selectedFilterIds = input.selectedFilterIds;
 						webSearchEnabled = input.webSearchEnabled;
@@ -665,7 +663,7 @@
 		chatVariables = {};
 		chatFiles = [];
 		files = [];
-		selectedToolIds = [];
+		selectedMcpServerIds = [];
 		selectedSkillIds = [];
 		selectedFilterIds = [];
 		webSearchEnabled = false;
@@ -735,7 +733,7 @@
 	};
 
 	const resetInput = async () => {
-		selectedToolIds = [];
+		selectedMcpServerIds = [];
 		selectedSkillIds = [];
 		selectedFilterIds = [];
 		pendingOAuthTools = [];
@@ -770,11 +768,9 @@
 		settingDefaults = true;
 
 		try {
-			if (!$tools) {
-				tools.set(await getTools(localStorage.token));
-			}
-			if (!$functions) {
-				functions.set(await getFunctions(localStorage.token));
+			if (!$tools || $tools.length === 0) {
+				const catalog = await getMCPTools(localStorage.token);
+				if (catalog.length > 0) tools.set(catalog);
 			}
 			if (!$skills) {
 				skills.set(await getSkills(localStorage.token));
@@ -785,12 +781,13 @@
 
 			const model = atSelectedModel ?? $models.find((m) => m.id === selectedModels[0]);
 			if (model) {
-				// Set Default Tools
+				// Set default MCP servers.
 				const configuredToolIds = [
-					...new Set([...($settings?.tools ?? []), ...(model?.info?.meta?.toolIds ?? [])])
-				].filter(
-					(id) => ($tools ?? []).find((tool) => tool.id === id) || id.startsWith('direct_server:')
-				);
+					...new Set([
+						...($settings?.mcpServerIds ?? []),
+						...(model?.info?.meta?.mcpServerIds ?? [])
+					])
+				].filter((id) => ($tools ?? []).find((tool) => tool.id === id));
 
 				if (configuredToolIds.length > 0) {
 					const defaultIds = configuredToolIds;
@@ -801,20 +798,16 @@
 					for (const id of defaultIds) {
 						const tool = ($tools ?? []).find((t) => t.id === id);
 						if (tool && tool.authenticated === false) {
-							const parts = id.split(':');
-							const serverId = parts.at(-1) ?? id;
-							const authType =
-								parts.length > 1 ? (parts[0] === 'server' ? parts[1] : parts[0]) : null;
-							unauthed.push({ id, name: tool.name ?? id, serverId, authType });
+							unauthed.push({ id, name: tool.name ?? id, serverId: id, authType: 'mcp' });
 						} else {
 							authed.push(id);
 						}
 					}
-					selectedToolIds = authed;
+					selectedMcpServerIds = authed;
 					pendingOAuthTools = unauthed;
 					await continueOAuthRedirect();
 				} else {
-					selectedToolIds = selectedToolIds.filter((id) => !id.startsWith('direct_server:'));
+					selectedMcpServerIds = [];
 				}
 
 				// Set Default Skills
@@ -1373,7 +1366,7 @@
 				messageInput?.setText('');
 
 				files = [];
-				selectedToolIds = [];
+				selectedMcpServerIds = [];
 				selectedSkillIds = [];
 				selectedFilterIds = [];
 				webSearchEnabled = false;
@@ -1386,7 +1379,7 @@
 					if (!$temporaryChatEnabled) {
 						messageInput?.setText(input.prompt);
 						files = input.files;
-						selectedToolIds = input.selectedToolIds;
+						selectedMcpServerIds = input.selectedMcpServerIds ?? [];
 						selectedSkillIds = input.selectedSkillIds ?? [];
 						selectedFilterIds = input.selectedFilterIds;
 						webSearchEnabled = input.webSearchEnabled;
@@ -1882,15 +1875,9 @@
 			codeInterpreterEnabled = true;
 		}
 
-		if ($page.url.searchParams.get('tools')) {
-			selectedToolIds = $page.url.searchParams
-				.get('tools')
-				?.split(',')
-				.map((id) => id.trim())
-				.filter((id) => id);
-		} else if ($page.url.searchParams.get('tool-ids')) {
-			selectedToolIds = $page.url.searchParams
-				.get('tool-ids')
+		if ($page.url.searchParams.get('mcp-servers')) {
+			selectedMcpServerIds = $page.url.searchParams
+				.get('mcp-servers')
 				?.split(',')
 				.map((id) => id.trim())
 				.filter((id) => id);
@@ -1900,9 +1887,9 @@
 		const pendingToolId = sessionStorage.getItem('pendingOAuthToolId');
 		if (pendingToolId) {
 			sessionStorage.removeItem('pendingOAuthToolId');
-			if (!selectedToolIds.includes(pendingToolId)) {
-				selectedToolIds = [...selectedToolIds, pendingToolId];
-				const uiSettings = { ...$settings, tools: selectedToolIds };
+			if (!selectedMcpServerIds.includes(pendingToolId)) {
+				selectedMcpServerIds = [...selectedMcpServerIds, pendingToolId];
+				const uiSettings = { ...$settings, mcpServerIds: selectedMcpServerIds };
 				settings.set(uiSettings);
 				await updateUserSettings(localStorage.token, { ui: uiSettings }).catch((err) =>
 					console.error('Failed to persist OAuth tool selection', err)
@@ -3131,23 +3118,6 @@
 				);
 		}
 
-		const toolIds = [];
-		const toolServerIds = [];
-
-		for (const toolId of selectedToolIds) {
-			if (toolId.startsWith('direct_server:')) {
-				let serverId = toolId.replace('direct_server:', '');
-				// Check if serverId is a number
-				if (!isNaN(parseInt(serverId))) {
-					toolServerIds.push(parseInt(serverId));
-				} else {
-					toolServerIds.push(serverId);
-				}
-			} else {
-				toolIds.push(toolId);
-			}
-		}
-
 		// Menu-selected skills are sent as IDs; inline <$skillId|label> mentions stay
 		// in the message so the backend can inject their full content.
 		const skillIds = [...selectedSkillIds];
@@ -3175,14 +3145,11 @@
 				files: (files?.length ?? 0) > 0 ? files : undefined,
 
 				filter_ids: selectedFilterIds.length > 0 ? selectedFilterIds : undefined,
-				tool_ids: toolIds.length > 0 ? toolIds : undefined,
+				mcp_server_ids: selectedMcpServerIds.length > 0 ? selectedMcpServerIds : undefined,
 				skill_ids: skillIds.length > 0 ? skillIds : undefined,
 				terminal_id: terminalEnabled ? (activeTerminalId ?? undefined) : undefined,
 				tool_servers: [
-					...($toolServers ?? []).filter(
-						(server, idx) => toolServerIds.includes(idx) || toolServerIds.includes(server?.id)
-					),
-					// Direct terminal servers — always included when enabled (not routed through selectedToolIds)
+					// Direct terminal servers — always included when enabled.
 					...($terminalServers ?? []).filter((t) => !t.id)
 				],
 				features: getFeatures(),
@@ -3633,8 +3600,8 @@
 		await sessionStorage.removeItem(`chat-input${chatId ? `-${chatId}` : ''}`);
 	};
 
-	const moveChatHandler = async (chatId, folderId) => {
-		if (chatId && folderId) {
+	const moveChatHandler = async (chatId, folderId: string | null) => {
+		if (chatId) {
 			const res = await updateChatFolderIdById(localStorage.token, chatId, folderId).catch(
 				(error) => {
 					toast.error(`${error}`);
@@ -3646,7 +3613,9 @@
 				await refreshChatList(localStorage.token, { refreshPinned: true });
 				await refreshFolderChatLists();
 
-				toast.success($i18n.t('Chat moved successfully'));
+				toast.success(
+					folderId ? $i18n.t('Chat moved successfully') : $i18n.t('Chat removed from folder')
+				);
 			}
 		} else {
 			toast.error($i18n.t('Failed to move chat'));
@@ -3822,18 +3791,22 @@
 			{#if !embedded && $selectedFolder && $selectedFolder?.meta?.background_image_url}
 				<div
 					class="absolute top-0 left-0 w-full h-full bg-cover bg-center bg-no-repeat"
-					style="background-image: url({$selectedFolder?.meta?.background_image_url})  "></div>
+					style="background-image: url({$selectedFolder?.meta?.background_image_url})  "
+				></div>
 
 				<div
-					class="absolute top-0 left-0 w-full h-full bg-linear-to-t from-white to-white/85 dark:from-gray-900 dark:to-gray-900/90 z-0"></div>
+					class="absolute top-0 left-0 w-full h-full bg-linear-to-t from-white to-white/85 dark:from-gray-900 dark:to-gray-900/90 z-0"
+				></div>
 			{:else if !embedded && ($settings?.backgroundImageUrl ?? $config?.license_metadata?.background_image_url ?? null)}
 				<div
 					class="absolute top-0 left-0 w-full h-full bg-cover bg-center bg-no-repeat"
 					style="background-image: url({$settings?.backgroundImageUrl ??
-						$config?.license_metadata?.background_image_url})  "></div>
+						$config?.license_metadata?.background_image_url})  "
+				></div>
 
 				<div
-					class="absolute top-0 left-0 w-full h-full bg-linear-to-t from-white to-white/85 dark:from-gray-900 dark:to-gray-900/90 z-0"></div>
+					class="absolute top-0 left-0 w-full h-full bg-linear-to-t from-white to-white/85 dark:from-gray-900 dark:to-gray-900/90 z-0"
+				></div>
 			{/if}
 
 			<PaneGroup direction="horizontal" class="w-full h-full">
@@ -3992,7 +3965,7 @@
 										bind:files
 										bind:prompt
 										bind:autoScroll
-										bind:selectedToolIds
+										bind:selectedMcpServerIds
 										bind:selectedSkillIds
 										bind:selectedFilterIds
 										bind:imageGenerationEnabled
@@ -4111,7 +4084,7 @@
 										bind:files
 										bind:prompt
 										bind:autoScroll
-										bind:selectedToolIds
+										bind:selectedMcpServerIds
 										bind:selectedSkillIds
 										bind:selectedFilterIds
 										bind:imageGenerationEnabled
@@ -4158,7 +4131,7 @@
 									bind:files
 									bind:prompt
 									bind:autoScroll
-									bind:selectedToolIds
+									bind:selectedMcpServerIds
 									bind:selectedSkillIds
 									bind:selectedFilterIds
 									bind:imageGenerationEnabled

@@ -285,16 +285,12 @@ def _build_request(
     return request
 
 
-def _resolve_model_tool_ids(app, model_id: str) -> list[str]:
-    """Read model-attached tool_ids from model config.
-
-    The frontend does this in Chat.svelte (model.info.meta.toolIds).
-    The backend never auto-resolves them, so we must do it explicitly.
-    """
+def _resolve_model_mcp_server_ids(app, model_id: str) -> list[str]:
+    """Read MCP defaults from model configuration."""
     models = getattr(app.state, 'MODELS', {})
     model = models.get(model_id, {})
-    tool_ids = model.get('info', {}).get('meta', {}).get('toolIds', [])
-    return list(tool_ids) if tool_ids else []
+    meta = model.get('info', {}).get('meta', {})
+    return list(meta.get('mcpServerIds') or [])
 
 
 async def _resolve_model_features(app, model_id: str) -> dict:
@@ -513,7 +509,7 @@ async def execute_automation(app, automation: AutomationModel) -> None:
         )
 
         # Resolve model defaults (frontend does this, backend doesn't)
-        tool_ids = _resolve_model_tool_ids(app, model_id)
+        mcp_server_ids = _resolve_model_mcp_server_ids(app, model_id)
         features = await _resolve_model_features(app, model_id)
         filter_ids = _resolve_model_filter_ids(app, model_id)
 
@@ -537,8 +533,8 @@ async def execute_automation(app, automation: AutomationModel) -> None:
             'session_id': f'automation:{automation.id}',
             'background_tasks': {},
         }
-        if tool_ids:
-            form_data['tool_ids'] = tool_ids
+        if mcp_server_ids:
+            form_data['mcp_server_ids'] = mcp_server_ids
         if features:
             form_data['features'] = features
         if filter_ids:

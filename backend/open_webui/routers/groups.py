@@ -19,7 +19,6 @@ from open_webui.models.groups import (
 )
 from open_webui.models.knowledge import Knowledges
 from open_webui.models.models import Models
-from open_webui.models.tools import Tools
 from open_webui.models.users import UserInfoResponse, Users
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -372,16 +371,6 @@ async def preview_group_access(
         db=db,
     )
 
-    all_tools = await Tools.get_tools(defer_content=True, db=db)
-    accessible_tool_ids = await AccessGrants.get_accessible_resource_ids(
-        user_id='',
-        resource_type='tool',
-        resource_ids=[t.id for t in all_tools],
-        permission='read',
-        user_group_ids=group_ids,
-        db=db,
-    )
-
     active_models = [m for m in all_models if m.is_active]
 
     return {
@@ -393,10 +382,6 @@ async def preview_group_access(
         'knowledge': {
             'items': [{'id': k.id, 'name': k.name} for k in all_knowledge if k.id in accessible_knowledge_ids],
             'total': len(all_knowledge),
-        },
-        'tools': {
-            'items': [{'id': t.id, 'name': t.name} for t in all_tools if t.id in accessible_tool_ids],
-            'total': len(all_tools),
         },
         'permissions': group.permissions or {},
     }

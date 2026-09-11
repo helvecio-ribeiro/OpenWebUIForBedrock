@@ -158,43 +158,6 @@
 		<div class="flex flex-col w-full">
 			<div class="flex w-full justify-between my-1">
 				<div class=" self-center text-xs font-normal">
-					{$i18n.t('Tools Sharing')}
-				</div>
-				<Switch bind:state={permissions.sharing.tools} ariaLabel={$i18n.t('Tools Sharing')} />
-			</div>
-			{#if defaultPermissions?.sharing?.tools && !permissions.sharing.tools}
-				<div>
-					<div class="text-xs text-gray-500">
-						{$i18n.t('This is a default user permission and will remain enabled.')}
-					</div>
-				</div>
-			{/if}
-		</div>
-
-		{#if permissions.sharing.tools}
-			<div class="flex flex-col w-full">
-				<div class="flex w-full justify-between my-1">
-					<div class=" self-center text-xs font-normal">
-						{$i18n.t('Tools Public Sharing')}
-					</div>
-					<Switch
-						bind:state={permissions.sharing.public_tools}
-						ariaLabel={$i18n.t('Tools Public Sharing')}
-					/>
-				</div>
-				{#if defaultPermissions?.sharing?.public_tools && !permissions.sharing.public_tools}
-					<div>
-						<div class="text-xs text-gray-500">
-							{$i18n.t('This is a default user permission and will remain enabled.')}
-						</div>
-					</div>
-				{/if}
-			</div>
-		{/if}
-
-		<div class="flex flex-col w-full">
-			<div class="flex w-full justify-between my-1">
-				<div class=" self-center text-xs font-normal">
 					{$i18n.t('Skills Sharing')}
 				</div>
 				<Switch bind:state={permissions.sharing.skills} ariaLabel={$i18n.t('Skills Sharing')} />
@@ -387,22 +350,6 @@
 		</div>
 
 		{#if permissions.chat.controls}
-			<div class="flex flex-col w-full">
-				<div class="flex w-full justify-between my-1">
-					<div class=" self-center text-xs font-normal">
-						{$i18n.t('Allow Chat Valves')}
-					</div>
-					<Switch bind:state={permissions.chat.valves} ariaLabel={$i18n.t('Allow Chat Valves')} />
-				</div>
-				{#if defaultPermissions?.chat?.valves && !permissions.chat.valves}
-					<div>
-						<div class="text-xs text-gray-500">
-							{$i18n.t('This is a default user permission and will remain enabled.')}
-						</div>
-					</div>
-				{/if}
-			</div>
-
 			<div class="flex flex-col w-full">
 				<div class="flex w-full justify-between my-1">
 					<div class=" self-center text-xs font-normal">

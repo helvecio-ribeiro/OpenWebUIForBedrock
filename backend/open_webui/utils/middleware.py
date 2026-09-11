@@ -96,6 +96,7 @@ from open_webui.utils.filter import (
 
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.mcp.client import MCPClient
+from open_webui.utils.mcp.selection import get_user_mcp_server_ids, resolve_mcp_server_ids
 from open_webui.utils.memory import add_memory_context, review_memory_after_turn
 from open_webui.utils.misc import (
     add_or_update_system_message,
@@ -118,7 +119,11 @@ from open_webui.utils.misc import (
     set_last_user_message_content,
     strip_empty_content_blocks,
 )
-from open_webui.utils.payload import apply_system_prompt_to_body, resolve_system_prompt
+from open_webui.utils.payload import (
+    apply_global_system_prompt_to_body,
+    apply_system_prompt_to_body,
+    resolve_system_prompt,
+)
 from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.response import merge_usage, normalize_usage
 from open_webui.utils.sanitize import sanitize_code
@@ -132,7 +137,6 @@ from open_webui.utils.tools import (
     get_attached_knowledge,
     get_builtin_tools,
     get_terminal_tools,
-    get_tools,
     get_updated_tool_function,
 )
 from starlette.responses import JSONResponse, Response, StreamingResponse
@@ -1975,7 +1979,6 @@ def apply_params_to_form_data(form_data, model):
     open_webui_params = {
         'stream_response': bool,
         'stream_delta_chunk_size': int,
-        'function_calling': str,
         'reasoning_tags': list,
         'compact_token_threshold': int,
         'system': str,
@@ -2484,7 +2487,15 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         if folder and folder.data:
             if 'system_prompt' in folder.data:
-                form_data = await apply_system_prompt_to_body(folder.data['system_prompt'], form_data, metadata, user)
+                # Folder instructions are the narrowest user-configurable layer:
+                # admin prompt -> user prompt -> folder prompt.
+                form_data = await apply_system_prompt_to_body(
+                    folder.data['system_prompt'],
+                    form_data,
+                    metadata,
+                    user,
+                    append=True,
+                )
             if 'files' in folder.data:
                 if metadata.get('params', {}).get('function_calling') == 'legacy':
                     form_data['files'] = [
@@ -2640,7 +2651,13 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                         append=True,
                     )
 
-    tool_ids = form_data.pop('tool_ids', None)
+    mcp_server_ids = resolve_mcp_server_ids(form_data, metadata)
+    if mcp_server_ids is None and metadata.get('session_id'):
+        # The UI persists MCP selection per user. Treat that persisted state as
+        # authoritative when a chat payload omits the extension field, which can
+        # happen with stale clients or payload-normalizing intermediaries.
+        mcp_server_ids = get_user_mcp_server_ids(user)
+    log.debug('Resolved MCP server selection: %s', mcp_server_ids)
     terminal_id = form_data.pop('terminal_id', None)
     files = form_data.pop('files', None)
     form_data.pop('folder_id', None)
@@ -2728,7 +2745,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     metadata.update(
         {
             'model_id': form_data.get('model'),
-            'tool_ids': tool_ids,
+            'mcp_server_ids': mcp_server_ids,
             'skill_ids': skill_ids,
             'terminal_id': terminal_id,
             'files': files,
@@ -2742,11 +2759,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # unchanged.  Sending `tools: []` explicitly opts out of builtin injection.
     if payload_tools is None:
         # Server side tools
-        tool_ids = metadata.get('tool_ids', None)
+        mcp_server_ids = metadata.get('mcp_server_ids', None)
         # Client side tools
         direct_tool_servers = metadata.get('tool_servers', None)
 
-        log.debug(f'{tool_ids=}')
         log.debug(f'{direct_tool_servers=}')
 
         tools_dict = {}
@@ -2754,80 +2770,55 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         mcp_clients = {}
         mcp_tools_dict = {}
 
-        if tool_ids:
-            db_tool_ids = []
-            for tool_id in tool_ids:
-                if tool_id.startswith('server:mcp:'):
-                    try:
-                        server_id = tool_id[len('server:mcp:') :]
-
-                        result = await connect_mcp_server(
-                            request,
-                            server_id,
-                            user,
-                            metadata,
-                            extra_params,
+        if mcp_server_ids:
+            for server_id in mcp_server_ids:
+                try:
+                    result = await connect_mcp_server(
+                        request,
+                        server_id,
+                        user,
+                        metadata,
+                        extra_params,
+                    )
+                    if result is None:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"MCP server '{server_id}' is unavailable or access is denied",
                         )
-                        if result is None:
-                            continue
 
-                        client, tool_specs = result
-                        mcp_clients[server_id] = client
+                    client, tool_specs = result
+                    mcp_clients[server_id] = client
+                    for tool_spec in tool_specs:
 
-                        for tool_spec in tool_specs:
+                        async def make_mcp_tool_function(client, function_name):
+                            async def tool_function(**kwargs):
+                                return await client.call_tool(function_name, function_args=kwargs)
 
-                            async def make_tool_function(client, function_name):
-                                async def tool_function(**kwargs):
-                                    return await client.call_tool(
-                                        function_name,
-                                        function_args=kwargs,
-                                    )
+                            return tool_function
 
-                                return tool_function
+                        tool_function = await make_mcp_tool_function(client, tool_spec['name'])
+                        mcp_tools_dict[f'{server_id}_{tool_spec["name"]}'] = {
+                            'spec': {**tool_spec, 'name': f'{server_id}_{tool_spec["name"]}'},
+                            'callable': tool_function,
+                            'type': 'mcp',
+                            'client': client,
+                            'direct': False,
+                        }
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    log.exception("Failed to connect to MCP server '%s'", server_id)
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Failed to connect to MCP server '{server_id}': {exc}",
+                    ) from exc
 
-                            tool_function = await make_tool_function(client, tool_spec['name'])
+        # Merge tool schemas from the selected MCP servers into the provider request.
+        if mcp_tools_dict:
+            tools_dict = {**tools_dict, **mcp_tools_dict}
 
-                            mcp_tools_dict[f'{server_id}_{tool_spec["name"]}'] = {
-                                'spec': {
-                                    **tool_spec,
-                                    'name': f'{server_id}_{tool_spec["name"]}',
-                                },
-                                'callable': tool_function,
-                                'type': 'mcp',
-                                'client': client,
-                                'direct': False,
-                            }
-                    except Exception as e:
-                        log.debug(e)
-                        if event_emitter:
-                            await event_emitter(
-                                {
-                                    'type': 'chat:message:error',
-                                    'data': {'error': {'content': f"Failed to connect to MCP server '{server_id}'"}},
-                                }
-                            )
-                        continue
-                elif ENABLE_PLUGINS:
-                    db_tool_ids.append(tool_id)
-
-            if db_tool_ids:
-                tools_dict = await get_tools(
-                    request,
-                    db_tool_ids,
-                    user,
-                    {
-                        **extra_params,
-                        '__model__': models[task_model_id],
-                        '__messages__': form_data['messages'],
-                        '__files__': metadata.get('files', []),
-                    },
-                )
-
-            if mcp_tools_dict:
-                tools_dict = {**tools_dict, **mcp_tools_dict}
-
-        # Resolve terminal tools if terminal_id is set (outside tool_ids check
-        # so system terminals work even when no other tools are selected)
+        # Resolve terminal tools independently so system terminals work even
+        # when no MCP servers are selected.
         terminal_capability = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get('terminal', True)
         if terminal_id and terminal_capability:
             try:
@@ -2878,7 +2869,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         # Inject builtin tools for native function calling based on enabled features and model capability.
         # Only inject when the request originates from the UI (identified by session_id).
-        # API callers don't expect hidden tools; they can explicitly request tools via tool_ids.
+        # API callers don't expect hidden tools; they can explicitly provide provider tools.
         if use_builtin_tools:
             # Add file context to user messages
             chat_id = metadata.get('chat_id')
@@ -2924,22 +2915,11 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             # (e.g. pipe functions) can access all tools including MCP and builtins.
             metadata['tools'] = tools_dict
 
-            if metadata.get('params', {}).get('function_calling') != 'legacy':
-                # If the function calling is native, then call the tools function calling handler
-                form_data['tools'] = [
-                    {'type': 'function', 'function': tool.get('spec', {})} for tool in tools_dict.values()
-                ]
-                if inlet_filter_tools:
-                    form_data['tools'].extend(inlet_filter_tools)
-            else:
-                # If the function calling is not native, then call the tools function calling handler
-                try:
-                    form_data, flags = await chat_completion_tools_handler(
-                        request, form_data, extra_params, user, models, tools_dict
-                    )
-                    sources.extend(flags.get('sources', []))
-                except Exception as e:
-                    log.exception(e)
+            form_data['tools'] = [
+                {'type': 'function', 'function': tool.get('spec', {})} for tool in tools_dict.values()
+            ]
+            if inlet_filter_tools:
+                form_data['tools'].extend(inlet_filter_tools)
 
     # Check if file context extraction is enabled for this model (default True)
     file_context_enabled = (model.get('info', {}).get('meta', {}).get('capabilities') or {}).get('file_context', True)
@@ -2954,17 +2934,46 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     # Save the pre-RAG message state so the native tool call loop can
     # restore to the true original (before file-source injection) rather
     # than a snapshot that already has the RAG template baked in.
-    system_message = get_system_message(form_data['messages'])
-    system_content = get_content_from_message(system_message) if system_message else ''
+    # The request parameter is the user's system prompt. The frontend normally
+    # also sends it as the first system message; only inject it here for API
+    # callers that supplied the parameter without a system message. A prefix
+    # check is necessary because folder and feature instructions may already
+    # have been appended to that message.
     resolved_model_system_prompt = await resolve_system_prompt(
         model_system_prompt,
         metadata,
         user,
     )
-    if resolved_model_system_prompt:
-        system_content = (
-            f'{resolved_model_system_prompt}\n{system_content}' if system_content else resolved_model_system_prompt
+    system_message = get_system_message(form_data['messages'])
+    existing_system_content = get_content_from_message(system_message) if system_message else ''
+    resolved_model_system_prompt = resolved_model_system_prompt.strip()
+    user_prompt_already_present = (
+        resolved_model_system_prompt
+        and (
+            existing_system_content.strip() == resolved_model_system_prompt
+            or existing_system_content.startswith(f'{resolved_model_system_prompt}\n')
         )
+    )
+    if resolved_model_system_prompt and not user_prompt_already_present:
+        form_data = await apply_system_prompt_to_body(
+            resolved_model_system_prompt,
+            form_data,
+            metadata,
+            user,
+        )
+
+    # Enforce the administrator-managed prompt last so it is always the first
+    # instruction in the final system message. The existing user/model prompt
+    # follows it and remains independently stored.
+    form_data = await apply_global_system_prompt_to_body(
+        await Config.get('prompts.global_system', ''),
+        form_data,
+        metadata,
+        user,
+    )
+
+    system_message = get_system_message(form_data['messages'])
+    system_content = get_content_from_message(system_message) if system_message else ''
     metadata['system_prompt'] = system_content or None
     metadata['user_prompt'] = get_last_user_message(form_data['messages'])
     metadata['sources'] = sources[:] if sources else []

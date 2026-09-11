@@ -54,7 +54,7 @@ cd examples/managed-mcp/calendar-tools
 uv sync --frozen
 ```
 
-Open **Admin Panel → Settings → Integrations**, choose **Discover Services**, add **Local Calendar**, and enable it from the chat integrations menu. The enabled tool selection persists across new chats. No Open WebUI API key is required.
+Open **Admin Panel → Settings → Integrations**, choose **Discover Services**, add **Local Calendar**, and enable it from the chat integrations menu. Selected MCP server IDs are saved in the user's settings, persist across new chats, and affect the next message in the current chat. A new chat is not required. With no MCP selected, requests contain no Local Calendar schema and Calendar operations are unavailable. No Open WebUI API key is required.
 
 Discovery scans only immediate child directories of `MANAGED_MCP_PACKAGE_ROOTS`. Registration records the package in the runtime registry but does not copy it. Removing the registration stops the process and removes the registry entry while leaving this directory and its SQLite database on disk for later rediscovery.
 

@@ -367,22 +367,24 @@
 			{#if selectedPassage}
 				<div
 					bind:this={resultPopover}
-					class="absolute z-20 flex max-h-[calc(100%-1.5rem)] w-[min(28rem,calc(100%-1.5rem))] flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-xl transition-opacity dark:border-gray-700 dark:bg-gray-900"
+					class="absolute z-20 flex max-h-[calc(100%-1.5rem)] w-[min(28rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl transition-opacity dark:border-gray-700 dark:bg-gray-900"
 					class:opacity-0={!popoverPositioned}
 					style:left={`${popoverLeft}px`}
 					style:top={`${popoverTop}px`}
 				>
-					<div class="mb-2 flex items-center justify-between gap-2">
+					<div
+						class="flex shrink-0 items-center justify-between gap-2 rounded-t-2xl bg-gray-100 px-4 py-3 text-black"
+					>
 						<div>
 							<div class="font-medium">{actionLabels[selectedAction] ?? selectedAction}</div>
 							{#if aiModelName}
-								<div class="text-xs text-gray-400">Using {aiModelName}</div>
+								<div class="text-xs text-black">Using {aiModelName}</div>
 							{/if}
 						</div>
 						<div class="flex items-center gap-1">
 							<button
 								type="button"
-								class="flex size-8 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+								class="flex size-8 items-center justify-center rounded-lg text-black hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40"
 								disabled={aiPending || !aiResult}
 								on:click={copyResult}
 								aria-label="Copy result"
@@ -391,7 +393,7 @@
 								<Clipboard className="size-4" strokeWidth="1.5" />
 							</button>
 							<button
-								class="rounded-lg px-2 py-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+								class="rounded-lg px-2 py-1 text-black hover:bg-gray-200"
 								on:click={() => {
 									selectedPassage = '';
 									aiResult = '';
@@ -399,10 +401,10 @@
 							>
 						</div>
 					</div>
-					<div class="mb-3 line-clamp-3 border-l-2 border-gray-300 pl-3 text-xs text-gray-500">
-						{selectedAction === 'summarize-page' ? 'Entire page' : selectedPassage}
-					</div>
-					<div class="min-h-0 overflow-y-auto text-sm leading-6">
+					<div class="min-h-0 flex-1 overflow-y-auto p-4 text-sm leading-6">
+						<div class="mb-3 border-l-2 border-gray-300 pl-3 text-xs text-gray-500">
+							{selectedAction === 'summarize-page' ? 'Entire page' : selectedPassage}
+						</div>
 						{#if aiPending}
 							Thinking...
 						{:else if aiResult}

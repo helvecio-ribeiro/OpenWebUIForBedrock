@@ -97,7 +97,7 @@ Tasks:
 Backend integration points:
 
 - `backend/open_webui/main.py`: lifespan startup, runtime client, readiness, shutdown.
-- `backend/open_webui/routers/tools.py`: include accessible managed servers in the tool list.
+- `backend/open_webui/routers/mcp.py`: expose the authorized, secret-free local and remote MCP catalog.
 - `backend/open_webui/utils/middleware.py`: resolve managed server IDs to private runtime MCP URLs.
 - `backend/open_webui/utils/mcp/client.py`: retain current HTTP behavior; optionally add Unix-socket HTTP support.
 - `backend/open_webui/models/users.py` and `groups.py`: validate access-rule subjects without creating new persistence relationships.
@@ -105,8 +105,8 @@ Backend integration points:
 
 Acceptance criteria:
 
-- Existing remote MCP and OpenAPI tool servers behave exactly as before.
-- A managed server appears as `server:mcp:<id>` and uses existing tool namespacing.
+- Existing remote Streamable HTTP MCP servers continue to work.
+- A managed server appears under its raw stable ID and uses MCP tool namespacing internally.
 - A user without a read grant cannot see or invoke it.
 - Backend restart reconciles desired state without duplicating processes.
 - Multiple Uvicorn workers do not create multiple MCP children.

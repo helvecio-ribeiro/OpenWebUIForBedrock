@@ -9,7 +9,7 @@
 
 	import { terminalServers, tools } from '$lib/stores';
 	import { getTerminalServers } from '$lib/apis/terminal';
-	import { getTools } from '$lib/apis/tools';
+	import { getMCPTools } from '$lib/apis/mcp';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import Switch from '$lib/components/common/Switch.svelte';
@@ -18,7 +18,7 @@
 	import Plus from '$lib/components/icons/Plus.svelte';
 	import Cog6 from '$lib/components/icons/Cog6.svelte';
 	import Cloud from '$lib/components/icons/Cloud.svelte';
-	import Connection from '$lib/components/chat/Settings/Tools/Connection.svelte';
+	import Connection from '$lib/components/admin/Settings/MCPConnection.svelte';
 	import SensitiveInput from '$lib/components/common/SensitiveInput.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 
@@ -69,7 +69,14 @@
 			managedMCPDiscovery = await discoverManagedMCPServices(localStorage.token);
 			// Chat keeps the tool catalogue in a global store. Discovery must
 			// replace it so already-open chats see newly ready local services.
-			tools.set(await getTools(localStorage.token));
+			try {
+				tools.set(await getMCPTools(localStorage.token));
+			} catch (error) {
+				console.error('Local MCP discovery succeeded, but catalog refresh failed', error);
+				toast.error(
+					error instanceof Error ? error.message : $i18n.t('Failed to refresh MCP catalog')
+				);
+			}
 		} catch (error) {
 			toast.error(error instanceof Error ? error.message : $i18n.t('Service discovery failed'));
 		} finally {
@@ -117,6 +124,7 @@
 	};
 
 	const updateHandler = async () => {
+		servers = (servers ?? []).filter((server) => server.type === 'mcp');
 		const res = await setToolServerConnections(localStorage.token, {
 			TOOL_SERVER_CONNECTIONS: servers
 		}).catch((err) => {
@@ -178,7 +186,9 @@
 
 	onMount(async () => {
 		const res = await getToolServerConnections(localStorage.token);
-		servers = res.TOOL_SERVER_CONNECTIONS as ToolServerConnection[];
+		servers = (res.TOOL_SERVER_CONNECTIONS as ToolServerConnection[]).filter(
+			(server) => server.type === 'mcp'
+		);
 
 		try {
 			const terminalRes = await getTerminalServerConnections(localStorage.token);
@@ -346,7 +356,7 @@
 				<div>
 					<div class="mb-2 flex items-center justify-between">
 						<div class="text-xs text-gray-600 dark:text-gray-400">
-							{$i18n.t('External Tool Servers')}
+							{$i18n.t('External MCP Servers')}
 						</div>
 
 						<Tooltip content={$i18n.t(`Add Connection`)}>
@@ -379,12 +389,12 @@
 
 					{#if (servers ?? []).length === 0}
 						<div class="text-[0.6875rem] text-gray-400 dark:text-gray-600">
-							{$i18n.t('No tool server connections configured.')}
+							{$i18n.t('No MCP server connections configured.')}
 						</div>
 					{/if}
 
 					<div class="mt-1 text-[0.6875rem] text-gray-400 dark:text-gray-600">
-						{$i18n.t('Connect to your own OpenAPI compatible external tool servers.')}
+						{$i18n.t('Connect to external MCP servers using Streamable HTTP.')}
 					</div>
 				</div>
 			</AdminSettingSection>

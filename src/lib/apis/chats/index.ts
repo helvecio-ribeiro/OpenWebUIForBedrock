@@ -1093,7 +1093,11 @@ export const shareChatById = async (token: string, id: string) => {
 	return res;
 };
 
-export const updateChatFolderIdById = async (token: string, id: string, folderId?: string) => {
+export const updateChatFolderIdById = async (
+	token: string,
+	id: string,
+	folderId?: string | null
+) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_API_BASE_URL}/chats/${id}/folder`, {
@@ -1104,7 +1108,7 @@ export const updateChatFolderIdById = async (token: string, id: string, folderId
 			...(token && { authorization: `Bearer ${token}` })
 		},
 		body: JSON.stringify({
-			folder_id: folderId
+			folder_id: folderId ?? null
 		})
 	})
 		.then(async (res) => {

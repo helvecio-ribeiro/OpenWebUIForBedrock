@@ -48,6 +48,7 @@ async def apply_system_prompt_to_body(
     metadata: Optional[dict] = None,
     user=None,
     replace: bool = False,
+    append: bool = False,
 ) -> dict:
     system = await resolve_system_prompt(system, metadata, user)
     if not system:
@@ -56,8 +57,30 @@ async def apply_system_prompt_to_body(
     if replace:
         form_data['messages'] = replace_system_message_content(system, form_data.get('messages', []))
     else:
-        form_data['messages'] = add_or_update_system_message(system, form_data.get('messages', []))
+        form_data['messages'] = add_or_update_system_message(
+            system,
+            form_data.get('messages', []),
+            append=append,
+        )
 
+    return form_data
+
+
+async def apply_global_system_prompt_to_body(
+    system: Optional[str],
+    form_data: dict,
+    metadata: Optional[dict] = None,
+    user=None,
+) -> dict:
+    """Prepend the administrator prompt without replacing request-specific instructions."""
+    system = await resolve_system_prompt(system, metadata, user)
+    if not system or not system.strip():
+        return form_data
+
+    form_data['messages'] = add_or_update_system_message(
+        system.strip(),
+        form_data.get('messages', []),
+    )
     return form_data
 
 
@@ -91,7 +114,6 @@ def remove_open_webui_params(params: dict) -> dict:
     open_webui_params = {
         'stream_response': bool,
         'stream_delta_chunk_size': int,
-        'function_calling': str,
         'reasoning_tags': list,
         'compact_token_threshold': int,
         'system': str,

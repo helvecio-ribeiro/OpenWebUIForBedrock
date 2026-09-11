@@ -457,6 +457,19 @@
 
 							<div class="flex items-center">{$i18n.t('Move')}</div>
 						</button>
+
+						<button
+							draggable="false"
+							class="flex h-[1.6875rem] w-full items-center gap-2 overflow-hidden rounded-xl px-2 text-[13px] cursor-pointer hover:bg-gray-50/40 dark:hover:bg-gray-800/40"
+							on:click={() => {
+								moveChatHandler(chat.id, null);
+							}}
+						>
+							<div class="shrink-0">
+								<Folder className="size-3.5" strokeWidth="1.5" />
+							</div>
+							<div class="truncate">{$i18n.t('No folder')}</div>
+						</button>
 						{#each $folders.sort((a, b) => b.updated_at - a.updated_at) as folder}
 							{#if folder?.id}
 								<button

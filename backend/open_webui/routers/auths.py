@@ -128,6 +128,7 @@ ADMIN_CONFIG_KEYS = {
     'PENDING_USER_OVERLAY_TITLE': 'ui.pending_user_overlay_title',
     'PENDING_USER_OVERLAY_CONTENT': 'ui.pending_user_overlay_content',
     'RESPONSE_WATERMARK': 'ui.watermark',
+    'GLOBAL_SYSTEM_PROMPT': 'prompts.global_system',
 }
 
 LDAP_SERVER_CONFIG_KEYS = {
@@ -1211,6 +1212,7 @@ class AdminConfig(BaseModel):
     PENDING_USER_OVERLAY_TITLE: str | None = None
     PENDING_USER_OVERLAY_CONTENT: str | None = None
     RESPONSE_WATERMARK: str | None = None
+    GLOBAL_SYSTEM_PROMPT: str | None = None
 
 
 @router.post('/admin/config')
