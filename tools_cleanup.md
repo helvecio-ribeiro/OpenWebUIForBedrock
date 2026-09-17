@@ -168,7 +168,7 @@ Completion notes:
 - Added an intentionally irreversible migration that deletes Tool access grants and drops the `tool`
   table. The generic provider tool-call engine remains because MCP execution depends on it.
 
-### 5. Remove Functions, Filters, Pipes, Actions, and function Events — frontend complete, backend pending
+### 5. Remove Functions, Filters, Pipes, Actions, and function Events — completed
 
 Remove:
 
@@ -193,9 +193,15 @@ Primary affected files:
 
 Browser Panel Actions such as Explain Text, Find Bias, Challenge Text, and Summarize Page must remain. They are unrelated direct model requests despite sharing the word `Action`.
 
-Current status: the Functions administration routes/editors and the legacy Filters/Actions selection
-surfaces have been removed from the frontend. `ENABLE_PLUGINS` and remaining backend compatibility
-paths stay until their runtime callers and persistence can be removed together.
+Completion notes:
+
+- Removed the Function ORM, router, dynamic loader, dependency installer, and function table.
+- Removed Function models/Pipes from model discovery and provider dispatch.
+- Removed inlet, outlet, and streaming Function filters from chat processing.
+- Removed Function chat Actions and event subscribers while preserving Browser Panel Actions.
+- Removed `filter_ids`, Action/Filter model metadata, and `ENABLE_PLUGINS`.
+- Added an intentionally irreversible migration that deletes Function grants, removes stale
+  Action/Filter model metadata, and drops the `function` table.
 
 ### 6. Remove legacy Pipelines
 

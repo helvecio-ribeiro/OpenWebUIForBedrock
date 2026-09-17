@@ -33,7 +33,6 @@ from open_webui.env import (
     CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE,
     ENABLE_API_OUTLET_FILTERS,
     ENABLE_CHAT_RESPONSE_BASE64_IMAGE_URL_CONVERSION,
-    ENABLE_PLUGINS,
     ENABLE_QUERIES_CACHE,
     ENABLE_REALTIME_CHAT_SAVE,
     ENABLE_RESPONSES_API_STATEFUL,
@@ -88,12 +87,6 @@ from open_webui.utils.files import (
     get_image_base64_from_url,
     get_image_url_from_base64,
 )
-from open_webui.utils.filter import (
-    FilterContext,
-    get_filter_functions,
-    process_filter_functions,
-)
-
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.mcp.client import MCPClient
 from open_webui.utils.mcp.selection import get_user_mcp_server_ids, resolve_mcp_server_ids
@@ -124,7 +117,6 @@ from open_webui.utils.payload import (
     apply_system_prompt_to_body,
     resolve_system_prompt,
 )
-from open_webui.utils.plugin import load_function_module_by_id
 from open_webui.utils.response import merge_usage, normalize_usage
 from open_webui.utils.sanitize import sanitize_code
 from open_webui.utils.task import (
@@ -2323,6 +2315,18 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             form_data['model'] = selected_model_id
             metadata['selected_model_id'] = selected_model_id
 
+    # Establish the administrator instruction before any feature, MCP, RAG,
+    # or tool preprocessing. This makes it part of the same system-message
+    # lifecycle as the user prompt instead of adding it only after tools have
+    # already been resolved. It is checked again at provider dispatch, where
+    # idempotent composition prevents duplication.
+    form_data = await apply_global_system_prompt_to_body(
+        await Config.get('prompts.global_system', ''),
+        form_data,
+        metadata,
+        user,
+    )
+
     # Captured before apply_params_to_form_data pops 'params'; feeds metadata['system_prompt'] below
     model_system_prompt = (form_data.get('params') or {}).get('system')
 
@@ -2558,21 +2562,6 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     except Exception as e:
         raise e
 
-    if ENABLE_PLUGINS:
-        try:
-            filter_functions = await get_filter_functions(request, model, metadata.get('filter_ids', []))
-
-            form_data, flags = await process_filter_functions(
-                request=request,
-                filter_context=None,
-                filter_functions=filter_functions,
-                filter_type='inlet',
-                form_data=form_data,
-                extra_params=extra_params,
-            )
-        except Exception as e:
-            raise Exception(f'{e}')
-
     features = form_data.pop('features', None) or {}
     extra_params['__features__'] = features
     if features:
@@ -2585,6 +2574,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 form_data['messages'] = add_or_update_system_message(
                     template,
                     form_data['messages'],
+                    append=True,
                 )
 
             voice_control_prompt = get_voice_control_system_prompt(metadata)
@@ -2912,7 +2902,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
         if tools_dict:
             # Always store resolved tools in metadata so downstream consumers
-            # (e.g. pipe functions) can access all tools including MCP and builtins.
+            # Internal requests can access all tools including MCP and built-ins.
             metadata['tools'] = tools_dict
 
             form_data['tools'] = [
@@ -3517,7 +3507,6 @@ async def outlet_filter_handler(ctx):
                 }
                 for m in message_list
             ],
-            'filter_ids': metadata.get('filter_ids', []),
             'chat_id': chat_id,
             'session_id': metadata.get('session_id'),
             'id': message_id,
@@ -3530,29 +3519,7 @@ async def outlet_filter_handler(ctx):
         except Exception as e:
             log.debug(f'Pipeline outlet filter error: {e}')
 
-        # Function outlet filters
-        extra_params = {
-            '__event_emitter__': event_emitter,
-            '__event_call__': event_caller,
-            '__user__': user.model_dump() if isinstance(user, UserModel) else {},
-            '__metadata__': metadata,
-            '__request__': request,
-            '__model__': model,
-        }
-
-        if ENABLE_PLUGINS:
-            filter_functions = await get_filter_functions(request, model, metadata.get('filter_ids', []))
-
-            outlet_result, _ = await process_filter_functions(
-                request=request,
-                filter_context=None,
-                filter_functions=filter_functions,
-                filter_type='outlet',
-                form_data=outlet_data,
-                extra_params=extra_params,
-            )
-        else:
-            outlet_result = outlet_data
+        outlet_result = outlet_data
 
         if outlet_result and outlet_result.get('messages'):
             if not is_unsaved_chat and messages_map:
@@ -3592,6 +3559,161 @@ async def outlet_filter_handler(ctx):
         log.debug(f'Error running outlet filters: {e}')
 
 
+def get_non_streaming_tool_calls(response_data: dict | None) -> list[dict]:
+    """Return OpenAI-compatible tool calls from a non-streaming response."""
+    if not isinstance(response_data, dict):
+        return []
+    choices = response_data.get('choices') or []
+    if not choices:
+        return []
+    message = choices[0].get('message') or {}
+    calls = message.get('tool_calls') or []
+    return _split_tool_calls(calls) if isinstance(calls, list) else []
+
+
+async def execute_non_streaming_server_tool_call(tool_call: dict, ctx) -> dict:
+    """Execute one already-resolved server-side tool and return a tool message."""
+    request = ctx['request']
+    form_data = ctx['form_data']
+    metadata = ctx['metadata']
+    user = ctx['user']
+    tools = metadata.get('tools') or {}
+
+    call_id = tool_call.get('id') or f'call_{uuid4().hex[:24]}'
+    function_call = tool_call.get('function') or {}
+    name = function_call.get('name', '')
+    raw_arguments = function_call.get('arguments', '{}')
+    if not isinstance(raw_arguments, str):
+        raw_arguments = json.dumps(raw_arguments)
+
+    try:
+        params = JSONCodec.loads(raw_arguments or '{}')
+    except Exception:
+        try:
+            params = ast.literal_eval(raw_arguments or '{}')
+        except Exception:
+            params = None
+
+    tool = tools.get(name)
+    if params is None or not isinstance(params, dict):
+        result = f'Error: Tool call arguments for "{name}" are not a valid JSON object.'
+    elif not tool:
+        result = f'Error: Tool "{name}" is unavailable.'
+    elif tool.get('direct', False):
+        # Browser Actions have no client-side RPC channel. MCP tools are always
+        # server-side; reject any accidentally inherited direct tool explicitly.
+        result = f'Error: Direct client tool "{name}" cannot run in this request.'
+    else:
+        spec = tool.get('spec', {})
+        allowed_params = set((spec.get('parameters') or {}).get('properties', {}).keys())
+        if allowed_params:
+            params = {key: value for key, value in params.items() if key in allowed_params}
+        try:
+            function = await get_updated_tool_function(
+                function=tool['callable'],
+                extra_params={
+                    '__messages__': form_data.get('messages', []),
+                    '__files__': metadata.get('files', []),
+                },
+            )
+            result = await function(**params)
+            result, _, _ = await process_tool_result(
+                request,
+                name,
+                result,
+                tool.get('type', ''),
+                False,
+                metadata,
+                user,
+            )
+        except Exception as exc:
+            log.exception('Non-streaming tool %s failed', name)
+            result = f'Error executing tool "{name}": {exc}'
+
+    return {
+        'role': 'tool',
+        'tool_call_id': call_id,
+        'name': name,
+        'content': str(result) if result is not None else '',
+    }
+
+
+async def complete_non_streaming_server_tool_loop(response, ctx):
+    """Run provider tool calls to completion for synchronous API requests.
+
+    Streaming chats already own an event-oriented tool loop. Direct callers
+    such as Browser Panel Actions have no socket event channel, so their loop
+    must complete before the HTTP response is returned.
+    """
+    metadata = ctx['metadata']
+    if not metadata.get('tools'):
+        return response
+
+    request = ctx['request']
+    form_data = ctx['form_data']
+    user = ctx['user']
+    seen_calls: set[str] = set()
+    max_iterations = getattr(
+        request.state,
+        'max_tool_call_iterations',
+        CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS,
+    )
+    if max_iterations is None:
+        max_iterations = 12
+
+    for iteration in range(max(0, max_iterations)):
+        _, response_data = get_response_data(response)
+        tool_calls = get_non_streaming_tool_calls(response_data)
+        if not tool_calls:
+            return response
+
+        signatures = [
+            json.dumps(
+                {
+                    'name': (call.get('function') or {}).get('name', ''),
+                    'arguments': (call.get('function') or {}).get('arguments', ''),
+                },
+                sort_keys=True,
+            )
+            for call in tool_calls
+        ]
+        if all(signature in seen_calls for signature in signatures):
+            raise HTTPException(status_code=502, detail='Model repeated the same tool call without completing')
+        seen_calls.update(signatures)
+
+        choices = response_data.get('choices') or []
+        assistant_message = copy.deepcopy((choices[0].get('message') or {}))
+        assistant_message['role'] = 'assistant'
+        assistant_message['tool_calls'] = tool_calls
+        assistant_message.setdefault('content', None)
+        form_data['messages'].append(assistant_message)
+
+        tool_messages = await asyncio.gather(
+            *(execute_non_streaming_server_tool_call(call, ctx) for call in tool_calls)
+        )
+        form_data['messages'].extend(tool_messages)
+
+        continuation = {
+            **form_data,
+            'stream': False,
+            'messages': form_data['messages'],
+        }
+        response = await generate_chat_completion(
+            request,
+            continuation,
+            user,
+            bypass_system_prompt=True,
+        )
+
+    _, response_data = get_response_data(response)
+    if get_non_streaming_tool_calls(response_data):
+        raise HTTPException(
+            status_code=502,
+            detail=f'Tool-call limit reached ({max_iterations} iterations)',
+        )
+    return response
+
+
 async def non_streaming_chat_response_handler(response, ctx):
     request = ctx['request']
 
@@ -3601,6 +3723,7 @@ async def non_streaming_chat_response_handler(response, ctx):
 
     event_emitter = ctx['event_emitter']
 
+    response = await complete_non_streaming_server_tool_loop(response, ctx)
     response, response_data = get_response_data(response)
     if response_data is None:
         return response
@@ -3802,10 +3925,6 @@ async def streaming_chat_response_handler(response, ctx):
         '__model__': model,
     }
 
-    filter_functions = (
-        await get_filter_functions(request, model, metadata.get('filter_ids', [])) if ENABLE_PLUGINS else []
-    )
-
     # Standard streaming response handler
     # event_caller is optional — only needed for direct (client-side) tools
     # and pyodide code interpreter. Server-side tools work without it.
@@ -3815,7 +3934,6 @@ async def streaming_chat_response_handler(response, ctx):
 
         # Handle as a background task
         async def response_handler(response, events):
-            filter_context = FilterContext()
             tag_scan_positions = {}
 
             def tag_output_handler(content_type, tags, output):
@@ -4244,8 +4362,6 @@ async def streaming_chat_response_handler(response, ctx):
                         if delta_count >= delta_chunk_size:
                             await flush_pending_delta_data(delta_chunk_size)
 
-                    filter_extra_params = {'__body__': form_data, **extra_params} if filter_functions else None
-
                     async for line in response.body_iterator:
                         line = line.decode('utf-8', 'replace') if isinstance(line, bytes) else line
                         data = line
@@ -4284,16 +4400,6 @@ async def streaming_chat_response_handler(response, ctx):
 
                         try:
                             data = JSONCodec.loads(data)
-
-                            if filter_functions:
-                                data, _ = await process_filter_functions(
-                                    request=request,
-                                    filter_context=filter_context,
-                                    filter_functions=filter_functions,
-                                    filter_type='stream',
-                                    form_data=data,
-                                    extra_params=filter_extra_params,
-                                )
 
                             if data:
                                 if 'event' in data and not getattr(request.state, 'direct', False):
@@ -5624,9 +5730,8 @@ async def streaming_chat_response_handler(response, ctx):
                 return f'data: {item}\n\n'
 
             assistant_message = {}
-            filter_context = FilterContext()
-            has_api_outlet_filters = ENABLE_API_OUTLET_FILTERS and bool(filter_functions)
-            if ENABLE_API_OUTLET_FILTERS and not has_api_outlet_filters:
+            has_api_outlet_filters = False
+            if ENABLE_API_OUTLET_FILTERS:
                 try:
                     model_id = model.get('id') if isinstance(model, dict) else model
                     has_api_outlet_filters = bool(
@@ -5637,28 +5742,10 @@ async def streaming_chat_response_handler(response, ctx):
                     has_api_outlet_filters = True
 
             for event in events:
-                event, _ = await process_filter_functions(
-                    request=request,
-                    filter_context=filter_context,
-                    filter_functions=filter_functions,
-                    filter_type='stream',
-                    form_data=event,
-                    extra_params=extra_params,
-                )
-
                 if event:
                     yield wrap_item(JSONCodec.dumps(event))
 
             async for data in original_generator:
-                data, _ = await process_filter_functions(
-                    request=request,
-                    filter_context=filter_context,
-                    filter_functions=filter_functions,
-                    filter_type='stream',
-                    form_data=data,
-                    extra_params=extra_params,
-                )
-
                 if data:
                     if has_api_outlet_filters:
                         update_assistant_message_from_stream(assistant_message, data)

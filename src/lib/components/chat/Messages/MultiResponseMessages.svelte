@@ -36,7 +36,6 @@
 	export let editMessage: Function;
 	export let saveMessage: Function;
 	export let rateMessage: Function;
-	export let actionMessage: Function;
 
 	export let submitMessage: Function;
 	export let deleteMessage: Function;
@@ -256,8 +255,8 @@
 							? 'hidden'
 							: ''}"
 					>
-					<div
-						class="flex gap-2 scrollbar-none overflow-x-auto w-fit text-center font-normal bg-transparent pt-1 text-sm"
+						<div
+							class="flex gap-2 scrollbar-none overflow-x-auto w-fit text-center font-normal bg-transparent pt-1 text-sm"
 							on:wheel|preventDefault={(e) => {
 								e.currentTarget.scrollLeft += e.deltaY;
 							}}
@@ -314,7 +313,6 @@
 									{saveMessage}
 									{rateMessage}
 									{deleteMessage}
-									{actionMessage}
 									{submitMessage}
 									{continueResponse}
 									regenerateResponse={async (message, prompt = null) => {
@@ -384,7 +382,6 @@
 										{rateMessage}
 										{deleteMessage}
 										{allowDelete}
-										{actionMessage}
 										{submitMessage}
 										{continueResponse}
 										regenerateResponse={async (message, prompt = null) => {

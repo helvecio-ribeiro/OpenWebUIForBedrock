@@ -144,7 +144,6 @@
 
 	export let selectedMcpServerIds = [];
 	export let selectedSkillIds = [];
-	export let selectedFilterIds = [];
 
 	export let imageGenerationEnabled = false;
 	export let webSearchEnabled = false;
@@ -184,7 +183,6 @@
 			}),
 		selectedMcpServerIds,
 		selectedSkillIds,
-		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
 		codeInterpreterEnabled
@@ -1792,7 +1790,6 @@
 															console.log('Escape');
 															atSelectedModel = undefined;
 															selectedMcpServerIds = [];
-															selectedFilterIds = [];
 
 															webSearchEnabled = false;
 															imageGenerationEnabled = false;

@@ -46,7 +46,6 @@
 
 	export let selectedMcpServerIds = [];
 	export let selectedSkillIds = [];
-	export let selectedFilterIds = [];
 	export let pendingOAuthTools = [];
 
 	export let showCommands = false;
@@ -223,7 +222,6 @@
 						bind:autoScroll
 						bind:selectedMcpServerIds
 						bind:selectedSkillIds
-						bind:selectedFilterIds
 						bind:imageGenerationEnabled
 						bind:codeInterpreterEnabled
 						bind:webSearchEnabled

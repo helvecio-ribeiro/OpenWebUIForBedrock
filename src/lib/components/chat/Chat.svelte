@@ -87,7 +87,6 @@
 	import { getAndUpdateUserLocation, getUserSettings, updateUserSettings } from '$lib/apis/users';
 	import {
 		generateQueries,
-		chatAction,
 		generateMoACompletion,
 		stopTask,
 		stopTasksByChatId,
@@ -315,7 +314,6 @@
 
 	let selectedMcpServerIds = [];
 	let selectedSkillIds = [];
-	let selectedFilterIds = [];
 	let pendingOAuthTools = [];
 
 	let imageGenerationEnabled = false;
@@ -575,7 +573,6 @@
 		files = [];
 		selectedMcpServerIds = [];
 		selectedSkillIds = [];
-		selectedFilterIds = [];
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
 
@@ -614,7 +611,6 @@
 						files = input.files;
 						selectedMcpServerIds = input.selectedMcpServerIds ?? [];
 						selectedSkillIds = input.selectedSkillIds ?? [];
-						selectedFilterIds = input.selectedFilterIds;
 						webSearchEnabled = input.webSearchEnabled;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
@@ -665,7 +661,6 @@
 		files = [];
 		selectedMcpServerIds = [];
 		selectedSkillIds = [];
-		selectedFilterIds = [];
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
 		codeInterpreterEnabled = false;
@@ -735,7 +730,6 @@
 	const resetInput = async () => {
 		selectedMcpServerIds = [];
 		selectedSkillIds = [];
-		selectedFilterIds = [];
 		pendingOAuthTools = [];
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
@@ -821,13 +815,6 @@
 					];
 				} else {
 					selectedSkillIds = [];
-				}
-
-				// Set Default Filters (Toggleable only)
-				if (model?.info?.meta?.defaultFilterIds) {
-					selectedFilterIds = model.info.meta.defaultFilterIds.filter((id) =>
-						model?.filters?.find((f) => f.id === id)
-					);
 				}
 
 				// Set Default Features
@@ -1368,7 +1355,6 @@
 				files = [];
 				selectedMcpServerIds = [];
 				selectedSkillIds = [];
-				selectedFilterIds = [];
 				webSearchEnabled = false;
 				imageGenerationEnabled = false;
 				codeInterpreterEnabled = false;
@@ -1381,7 +1367,6 @@
 						files = input.files;
 						selectedMcpServerIds = input.selectedMcpServerIds ?? [];
 						selectedSkillIds = input.selectedSkillIds ?? [];
-						selectedFilterIds = input.selectedFilterIds;
 						webSearchEnabled = input.webSearchEnabled;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
@@ -2202,58 +2187,6 @@
 		// Just refresh the sidebar chat list.
 		if ($chatId == _chatId && !$temporaryChatEnabled) {
 			await refreshChatList(localStorage.token);
-		}
-	};
-
-	const chatActionHandler = async (_chatId, actionId, modelId, responseMessageId, event = null) => {
-		const messages = createMessagesList(history, responseMessageId);
-
-		const res = await chatAction(localStorage.token, actionId, {
-			model: modelId,
-			messages: messages.map((m) => ({
-				id: m.id,
-				role: m.role,
-				content: getOutputText(m.output) || m.content,
-				info: m.info ? m.info : undefined,
-				timestamp: m.timestamp,
-				...(m.sources ? { sources: m.sources } : {})
-			})),
-			...(event ? { event: event } : {}),
-			model_item: $models.find((m) => m.id === modelId),
-			chat_id: _chatId,
-			session_id: $socket?.id,
-			id: responseMessageId
-		}).catch((error) => {
-			toast.error(`${error}`);
-			messages.at(-1).error = { content: error };
-			return null;
-		});
-
-		if (res !== null && res.messages) {
-			// Update chat history with the new messages
-			for (const message of res.messages) {
-				history.messages[message.id] = {
-					...history.messages[message.id],
-					...(history.messages[message.id].content !== message.content
-						? { originalContent: history.messages[message.id].content }
-						: {}),
-					...message
-				};
-			}
-		}
-
-		if ($chatId == _chatId) {
-			if (!$temporaryChatEnabled) {
-				chat = await updateChatById(localStorage.token, _chatId, {
-					models: selectedModels,
-					messages: messages,
-					history: history,
-					params: params,
-					files: chatFiles
-				});
-
-				await refreshChatList(localStorage.token);
-			}
 		}
 	};
 
@@ -3144,7 +3077,6 @@
 
 				files: (files?.length ?? 0) > 0 ? files : undefined,
 
-				filter_ids: selectedFilterIds.length > 0 ? selectedFilterIds : undefined,
 				mcp_server_ids: selectedMcpServerIds.length > 0 ? selectedMcpServerIds : undefined,
 				skill_ids: skillIds.length > 0 ? skillIds : undefined,
 				terminal_id: terminalEnabled ? (activeTerminalId ?? undefined) : undefined,
@@ -3935,7 +3867,6 @@
 										{continueResponse}
 										{regenerateResponse}
 										{mergeResponses}
-										{chatActionHandler}
 										{addMessages}
 										allowDelete={!(generating || taskIds?.length)}
 										forkHandler={handleForkChat}
@@ -3967,7 +3898,6 @@
 										bind:autoScroll
 										bind:selectedMcpServerIds
 										bind:selectedSkillIds
-										bind:selectedFilterIds
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										{pendingOAuthTools}
@@ -4086,7 +4016,6 @@
 										bind:autoScroll
 										bind:selectedMcpServerIds
 										bind:selectedSkillIds
-										bind:selectedFilterIds
 										bind:imageGenerationEnabled
 										bind:codeInterpreterEnabled
 										{pendingOAuthTools}
@@ -4133,7 +4062,6 @@
 									bind:autoScroll
 									bind:selectedMcpServerIds
 									bind:selectedSkillIds
-									bind:selectedFilterIds
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:webSearchEnabled

@@ -75,6 +75,9 @@ def build_mcp_server_catalog(
             continue
         enabled = bool(server.get('enabled'))
         state = server.get('state', 'stopped')
+        access_grants = server.get('access_grants') or [
+            {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}
+        ]
         entries[server_id] = {
             'id': server_id,
             'name': server.get('name') or server_id,
@@ -86,7 +89,7 @@ def build_mcp_server_catalog(
             'selectable': enabled and state == 'ready',
             'authenticated': True,
             'auth_type': 'bearer',
-            'access_grants': server.get('access_grants') or [],
+            'access_grants': access_grants,
             'created_at': server.get('created_at', timestamp),
             'updated_at': server.get('updated_at', timestamp),
         }

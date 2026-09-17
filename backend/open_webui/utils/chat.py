@@ -10,7 +10,7 @@ from typing import Any, Optional
 from aiocache import cached
 from fastapi import HTTPException, Request, status
 from open_webui.env import BYPASS_MODEL_ACCESS_CONTROL, GLOBAL_LOG_LEVEL
-from open_webui.functions import generate_function_chat_completion
+from open_webui.models.config import Config
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel
 from open_webui.routers.ollama import (
@@ -29,12 +29,8 @@ from open_webui.socket.main import (
     get_event_emitter,
     sio,
 )
-from open_webui.utils.filter import (
-    get_filter_functions,
-    process_filter_functions,
-)
 from open_webui.utils.models import check_model_access, get_all_models
-from open_webui.utils.payload import convert_payload_openai_to_ollama
+from open_webui.utils.payload import apply_global_system_prompt_to_body, convert_payload_openai_to_ollama
 from open_webui.utils.response import (
     convert_response_ollama_to_openai,
     convert_streaming_response_ollama_to_openai,
@@ -157,6 +153,19 @@ async def generate_chat_completion(
     bypass_system_prompt: bool = False,
 ):
     log.debug(f'generate_chat_completion: {form_data}')
+
+    # This is the shared boundary for normal chats, Browser Actions, internal
+    # requests, and tool-call continuations. Enforce the administrator prompt
+    # here as a final invariant; the helper is idempotent when the full chat
+    # middleware already applied it.
+    metadata = form_data.get('metadata') or getattr(request.state, 'metadata', {}) or {}
+    form_data = await apply_global_system_prompt_to_body(
+        await Config.get('prompts.global_system', ''),
+        form_data,
+        metadata,
+        user,
+    )
+
     if BYPASS_MODEL_ACCESS_CONTROL:
         bypass_filter = True
 
@@ -280,9 +289,6 @@ async def generate_chat_completion(
                     'selected_model_id': selected_model_id,
                 }
 
-        if model.get('pipe'):
-            # Below does not require bypass_filter because this is the only route the uses this function and it is already bypassing the filter
-            return await generate_function_chat_completion(request, form_data, user=user, models=models)
         if model.get('owned_by') == 'ollama':
             # Using /ollama/api/chat endpoint
             form_data = convert_payload_openai_to_ollama(form_data)
@@ -353,31 +359,8 @@ async def chat_completed(request: Request, form_data: dict, user: Any):
     metadata = {
         'chat_id': data['chat_id'],
         'message_id': data['id'],
-        'filter_ids': data.get('filter_ids', []),
         'session_id': data['session_id'],
         'user_id': user.id,
     }
 
-    extra_params = {
-        '__event_emitter__': await get_event_emitter(metadata),
-        '__event_call__': await get_event_call(metadata),
-        '__user__': user.model_dump() if isinstance(user, UserModel) else {},
-        '__metadata__': metadata,
-        '__request__': request,
-        '__model__': model,
-    }
-
-    try:
-        filter_functions = await get_filter_functions(request, model, metadata.get('filter_ids', []))
-
-        result, _ = await process_filter_functions(
-            request=request,
-            filter_context=None,
-            filter_functions=filter_functions,
-            filter_type='outlet',
-            form_data=data,
-            extra_params=extra_params,
-        )
-        return result
-    except Exception as e:
-        raise Exception(f'Error: {e}')
+    return data

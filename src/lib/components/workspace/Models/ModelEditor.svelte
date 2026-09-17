@@ -285,10 +285,6 @@
 			}
 		}
 
-		delete info.meta.filterIds;
-		delete info.meta.defaultFilterIds;
-		delete info.meta.actionIds;
-
 		if (defaultFeatureIds.length > 0) {
 			info.meta.defaultFeatureIds = defaultFeatureIds;
 		} else {

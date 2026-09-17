@@ -1,6 +1,14 @@
 import asyncio
 
-from open_webui.utils.payload import apply_global_system_prompt_to_body, apply_system_prompt_to_body
+from open_webui.utils.payload import (
+    apply_global_system_prompt_at_provider,
+    apply_global_system_prompt_to_body,
+    apply_system_prompt_to_body,
+)
+from open_webui.routers.openai import (
+    convert_to_responses_payload,
+    openai_reasoning_model_handler,
+)
 from open_webui.routers.users import remove_accidental_global_prompt_copy
 
 
@@ -30,6 +38,79 @@ def test_global_prompt_creates_system_message_when_missing():
         'role': 'system',
         'content': 'Administrator instruction',
     }
+
+
+def test_global_prompt_is_idempotent_at_provider_dispatch_boundary():
+    form_data = {
+        'messages': [
+            {
+                'role': 'system',
+                'content': 'Administrator instruction\nUser instruction',
+            },
+            {'role': 'user', 'content': 'Hello'},
+        ]
+    }
+
+    result = asyncio.run(apply_global_system_prompt_to_body('Administrator instruction', form_data))
+
+    assert result['messages'][0]['content'] == 'Administrator instruction\nUser instruction'
+
+
+def test_provider_boundary_separates_admin_from_remaining_instructions():
+    form_data = {
+        'messages': [
+            {
+                'role': 'system',
+                'content': 'Administrator instruction\nUser instruction\nFolder instruction',
+            },
+            {'role': 'user', 'content': 'Hello'},
+        ]
+    }
+
+    result = asyncio.run(
+        apply_global_system_prompt_at_provider('Administrator instruction', form_data)
+    )
+
+    assert result['messages'][:2] == [
+        {'role': 'system', 'content': 'Administrator instruction'},
+        {'role': 'system', 'content': 'User instruction\nFolder instruction'},
+    ]
+
+
+def test_responses_adapter_preserves_all_system_instructions_in_order():
+    result = convert_to_responses_payload(
+        {
+            'model': 'gpt-5',
+            'messages': [
+                {'role': 'system', 'content': 'Administrator instruction'},
+                {'role': 'system', 'content': 'User and folder instructions'},
+                {'role': 'user', 'content': 'Hello'},
+            ],
+        }
+    )
+
+    assert result['instructions'] == (
+        'Administrator instruction\n\nUser and folder instructions'
+    )
+
+
+def test_reasoning_adapter_converts_every_leading_system_message():
+    payload = openai_reasoning_model_handler(
+        {
+            'model': 'gpt-5',
+            'messages': [
+                {'role': 'system', 'content': 'Administrator instruction'},
+                {'role': 'system', 'content': 'User instruction'},
+                {'role': 'user', 'content': 'Hello'},
+            ],
+        }
+    )
+
+    assert [message['role'] for message in payload['messages']] == [
+        'developer',
+        'developer',
+        'user',
+    ]
 
 
 def test_blank_global_prompt_does_not_change_messages():
@@ -80,3 +161,33 @@ def test_admin_user_and_folder_prompts_have_stable_priority_order():
         'role': 'system',
         'content': 'Administrator instruction\nUser instruction\nFolder instruction',
     }
+
+
+def test_feature_context_follows_admin_user_and_folder_prompts():
+    form_data = {
+        'messages': [
+            {'role': 'system', 'content': 'User instruction'},
+            {'role': 'user', 'content': 'Hello'},
+        ]
+    }
+
+    form_data = asyncio.run(apply_system_prompt_to_body('Folder instruction', form_data, append=True))
+    form_data = asyncio.run(apply_system_prompt_to_body('Feature instruction', form_data, append=True))
+    form_data = asyncio.run(apply_global_system_prompt_to_body('Administrator instruction', form_data))
+
+    assert form_data['messages'][0]['content'] == (
+        'Administrator instruction\nUser instruction\nFolder instruction\nFeature instruction'
+    )
+
+
+def test_reapplying_provider_model_prompt_does_not_duplicate_it():
+    form_data = {
+        'messages': [
+            {'role': 'system', 'content': 'Administrator instruction\nModel instruction'},
+            {'role': 'user', 'content': 'Hello'},
+        ]
+    }
+
+    result = asyncio.run(apply_system_prompt_to_body('Model instruction', form_data, append=True))
+
+    assert result['messages'][0]['content'] == 'Administrator instruction\nModel instruction'

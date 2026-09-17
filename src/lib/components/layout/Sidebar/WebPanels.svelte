@@ -27,6 +27,7 @@
 	let pending = false;
 	let openMenuPanelId: string | null = null;
 	let panelPendingDeletion: WebPanel | null = null;
+	let showBatchDeleteConfirm = false;
 
 	$: activeId = $page.url.pathname.startsWith('/web-panels/') ? $page.params.id : null;
 
@@ -54,8 +55,7 @@
 	};
 
 	const removeSelected = async () => {
-		if (!selectedIds.length || !confirm(`Delete ${selectedIds.length} selected browser tab(s)?`))
-			return;
+		if (!selectedIds.length || pending) return;
 		pending = true;
 		const ids = [...selectedIds];
 		const result = await deleteWebPanels(localStorage.token, ids).catch((error) => {
@@ -123,6 +123,17 @@
 	</div>
 </ConfirmDialog>
 
+<ConfirmDialog
+	bind:show={showBatchDeleteConfirm}
+	title="Delete selected browser tabs?"
+	on:confirm={removeSelected}
+>
+	<div class="text-sm text-gray-500">
+		This will permanently delete {selectedIds.length} selected browser
+		{selectedIds.length === 1 ? 'tab' : 'tabs'}.
+	</div>
+</ConfirmDialog>
+
 <SidebarSection id="sidebar-web-panels" name="Browser" className="mt-2" dragAndDrop={false}>
 	<svelte:fragment slot="action">
 		{#if selectionMode}
@@ -130,7 +141,7 @@
 				<button
 					class="flex size-7 items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-40"
 					disabled={!selectedIds.length || pending}
-					on:click|stopPropagation={removeSelected}
+					on:click|stopPropagation={() => (showBatchDeleteConfirm = true)}
 					aria-label="Delete selected panels"
 				>
 					<GarbageBinIcon className="size-3.5" />

@@ -62,6 +62,23 @@ def test_inference_profile_rejects_unknown_referenced_model(monkeypatch):
     assert not bedrock._profile_supports_text_chat(profile, {})
 
 
+def test_converse_request_preserves_global_system_instruction_for_nova():
+    _, request, _ = bedrock._converse_request(
+        {
+            'model': 'bedrock:amazon.nova-lite-v1:0',
+            'messages': [
+                {'role': 'system', 'content': 'Your name is Nana. Use the date tool for current dates.'},
+                {'role': 'user', 'content': 'What is your name?'},
+            ],
+        }
+    )
+
+    assert request['system'] == [
+        {'text': 'Your name is Nana. Use the date tool for current dates.'}
+    ]
+    assert request['messages'] == [{'role': 'user', 'content': [{'text': 'What is your name?'}]}]
+
+
 def test_converse_request_translates_openai_tools_and_tool_results():
     _, request, returned_names = bedrock._converse_request(
         {
@@ -478,3 +495,25 @@ def test_streaming_converse_translates_tool_call_events():
     assert start[0]['tool_calls'][0]['function']['name'] == 'filesystem-tools_list_directory'
     assert arguments[0]['tool_calls'][0]['function']['arguments'] == '{"path":"."}'
     assert finish == 'tool_calls'
+
+
+def test_bedrock_keeps_admin_and_user_prompts_as_separate_system_blocks():
+    payload = {
+        'system': [{'text': 'Admin instructions\nUser instructions'}],
+        'messages': [{'role': 'user', 'content': [{'text': 'Hello'}]}],
+    }
+
+    bedrock._prepend_global_system_block(payload, 'Admin instructions')
+
+    assert payload['system'] == [
+        {'text': 'Admin instructions'},
+        {'text': 'User instructions'},
+    ]
+
+
+def test_bedrock_adds_admin_system_block_when_no_other_prompt_exists():
+    payload = {'messages': [{'role': 'user', 'content': [{'text': 'Hello'}]}]}
+
+    bedrock._prepend_global_system_block(payload, 'Admin instructions')
+
+    assert payload['system'] == [{'text': 'Admin instructions'}]

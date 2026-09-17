@@ -143,7 +143,13 @@
 						</span>
 					</button>
 
-					<slot name="action" />
+					<!-- Action controls manage their own keyboard semantics. This boundary only prevents
+					     their pointer events from toggling the surrounding collapsible section. -->
+					<!-- svelte-ignore a11y-no-static-element-interactions -->
+					<!-- svelte-ignore a11y-click-events-have-key-events -->
+					<div on:pointerup|stopPropagation on:click|stopPropagation>
+						<slot name="action" />
+					</div>
 
 					{#if onAdd}
 						<button

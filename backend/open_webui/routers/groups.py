@@ -28,7 +28,6 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 ############################
-# GetFunctions
 ############################
 
 

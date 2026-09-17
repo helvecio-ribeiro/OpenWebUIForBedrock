@@ -188,6 +188,7 @@ type OllamaModelDetails = {
 type Settings = {
 	pinnedModels?: never[];
 	toolServers?: never[];
+	mcpServerIds?: string[];
 	detectArtifacts?: boolean;
 	showUpdateToast?: boolean;
 	showChangelog?: boolean;
@@ -313,7 +314,6 @@ type Config = {
 		enable_context_compaction?: boolean;
 		enable_community_sharing: boolean;
 		enable_memories: boolean;
-		enable_plugins?: boolean;
 		enable_autocomplete_generation: boolean;
 		enable_direct_connections: boolean;
 		enable_version_update_check: boolean;

@@ -218,7 +218,6 @@ type ChatCompletedForm = {
 	chat_id: string;
 	session_id: string | undefined;
 	id: string;
-	filter_ids?: string[];
 	model_item?: unknown;
 };
 
@@ -226,45 +225,6 @@ export const chatCompleted = async (token: string, body: ChatCompletedForm) => {
 	let error = null;
 
 	const res = await fetch(`${WEBUI_BASE_URL}/api/chat/completed`, {
-		method: 'POST',
-		headers: {
-			Accept: 'application/json',
-			'Content-Type': 'application/json',
-			...(token && { authorization: `Bearer ${token}` })
-		},
-		body: JSON.stringify(body)
-	})
-		.then(async (res) => {
-			if (!res.ok) throw await res.json();
-			return res.json();
-		})
-		.catch((err) => {
-			console.error(err);
-			if ('detail' in err) {
-				error = err.detail;
-			} else {
-				error = err;
-			}
-			return null;
-		});
-
-	if (error) {
-		throw error;
-	}
-
-	return res;
-};
-
-type ChatActionForm = {
-	model: string;
-	messages: string[];
-	chat_id: string;
-};
-
-export const chatAction = async (token: string, action_id: string, body: ChatActionForm) => {
-	let error = null;
-
-	const res = await fetch(`${WEBUI_BASE_URL}/api/chat/actions/${action_id}`, {
 		method: 'POST',
 		headers: {
 			Accept: 'application/json',

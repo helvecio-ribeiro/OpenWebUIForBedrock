@@ -44,6 +44,7 @@ from open_webui.utils.model_ids import strip_provider_model_prefix
 from open_webui.utils.json_codec import JSONCodec
 from open_webui.utils.misc import calculate_sha256
 from open_webui.utils.payload import (
+    apply_global_system_prompt_at_provider,
     apply_model_params_to_body_ollama,
     apply_model_params_to_body_openai,
     apply_system_prompt_to_body,
@@ -1134,11 +1135,15 @@ async def generate_chat_completion(
             system = params.pop('system', None)
             payload = apply_model_params_to_body_ollama(params, payload)
             if not bypass_system_prompt:
-                payload = await apply_system_prompt_to_body(system, payload, metadata, user)
+                payload = await apply_system_prompt_to_body(system, payload, metadata, user, append=True)
 
         await check_model_access(user, model_info, bypass_filter)
     else:
         await check_model_access(user, None, bypass_filter)
+
+    payload = await apply_global_system_prompt_at_provider(
+        await Config.get('prompts.global_system', ''), payload, metadata, user
+    )
 
     url, url_idx = await get_ollama_url(request, payload['model'], url_idx, user)
     api_configs = await Config.get('ollama.api_configs', {})
@@ -1337,11 +1342,15 @@ async def generate_openai_chat_completion(
         if params:
             system = params.pop('system', None)
             payload = apply_model_params_to_body_openai(params, payload)
-            payload = await apply_system_prompt_to_body(system, payload, metadata, user)
+            payload = await apply_system_prompt_to_body(system, payload, metadata, user, append=True)
 
         await check_model_access(user, model_info)
     else:
         await check_model_access(user, None)
+
+    payload = await apply_global_system_prompt_at_provider(
+        await Config.get('prompts.global_system', ''), payload, metadata, user
+    )
 
     url, url_idx = await get_ollama_url(request, payload['model'], url_idx, user)
     api_configs = await Config.get('ollama.api_configs', {})

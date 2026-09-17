@@ -13,6 +13,8 @@ from fastapi import Request
 from starlette.responses import JSONResponse, StreamingResponse
 
 from open_webui.env import AWS_CREDENTIALS, AWS_REGION, BEDROCK_CONVERSE_MODEL_PREFIXES
+from open_webui.models.config import Config
+from open_webui.utils.payload import resolve_system_prompt
 
 log = logging.getLogger(__name__)
 
@@ -451,6 +453,27 @@ def _converse_request(form_data: dict) -> tuple[object, dict, dict[str, str]]:
     return model_id, request, returned_tool_names
 
 
+def _prepend_global_system_block(payload: dict, global_system_prompt: str) -> None:
+    """Put the admin prompt in its own first AWS Converse system block."""
+    global_system_prompt = str(global_system_prompt or '').strip()
+    if not global_system_prompt:
+        return
+
+    remaining = []
+    prefix_pending = True
+    for block in payload.get('system', []):
+        text = str(block.get('text', ''))
+        if prefix_pending:
+            if text == global_system_prompt:
+                text = ''
+            elif text.startswith(f'{global_system_prompt}\n'):
+                text = text[len(global_system_prompt) :].lstrip()
+            prefix_pending = False
+        if text:
+            remaining.append({'text': text})
+    payload['system'] = [{'text': global_system_prompt}, *remaining]
+
+
 def _openai_response(
     model_id: str,
     content: str,
@@ -559,8 +582,30 @@ def _stream_event_deltas(
 
 
 async def generate_chat_completion(request: Request, form_data: dict, user=None):
-    del request, user
+    # Build the AWS system array explicitly for every invocation. Keep the
+    # administrator prompt as the first, independent system block.
+    metadata = form_data.get('metadata') or getattr(request.state, 'metadata', {}) or {}
+    global_system_prompt = await resolve_system_prompt(
+        await Config.get('prompts.global_system', ''),
+        metadata,
+        user,
+    )
     model_id, payload, returned_tool_names = _converse_request(form_data)
+    normalized_global_prompt = str(global_system_prompt or '').strip()
+    _prepend_global_system_block(payload, normalized_global_prompt)
+    system_text = '\n'.join(
+        block.get('text', '') for block in payload.get('system', []) if block.get('text')
+    )
+    log.info(
+        'Bedrock instruction context: model=%s system_blocks=%d system_chars=%d '
+        'global_chars=%d global_is_prefix=%s system_sha256=%s',
+        model_id,
+        len(payload.get('system', [])),
+        len(system_text),
+        len(normalized_global_prompt),
+        bool(normalized_global_prompt and system_text.startswith(normalized_global_prompt)),
+        hashlib.sha256(system_text.encode()).hexdigest()[:12] if system_text else 'none',
+    )
     if _calendar_delete_all_requested(form_data):
         refusal = (
             'Bulk deletion of all calendar appointments is disabled. '

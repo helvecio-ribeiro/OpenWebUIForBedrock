@@ -90,7 +90,6 @@ from open_webui.env import (
     ENABLE_COMPRESSION_MIDDLEWARE,
     ENABLE_CUSTOM_MODEL_FALLBACK,
     ENABLE_EASTER_EGGS,
-    ENABLE_PLUGINS,
     EXTERNAL_PWA_MANIFEST_URL,
     # OAuth Back-Channel Logout
     ENABLE_OAUTH_BACKCHANNEL_LOGOUT,
@@ -139,7 +138,6 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.channels import Channels
 from open_webui.models.chats import ChatForm, Chats
 from open_webui.models.config import Config
-from open_webui.models.functions import Functions
 from open_webui.models.messages import Messages
 from open_webui.models.models import Models
 from open_webui.models.users import Users
@@ -154,7 +152,6 @@ from open_webui.routers import (
     evaluations,
     files,
     folders,
-    functions,
     groups,
     images,
     knowledge,
@@ -205,7 +202,6 @@ from open_webui.tasks import (
 )  # Import from tasks.py
 from open_webui.utils import logger
 from open_webui.utils.access_control import has_permission
-from open_webui.utils.actions import chat_action as chat_action_handler
 from open_webui.utils.asgi_middleware import (
     AuthTokenMiddleware,
     CommitSessionMiddleware,
@@ -263,7 +259,6 @@ from open_webui.utils.oauth import (
     recover_static_oauth_client_metadata,
     resolve_oauth_client_info,
 )
-from open_webui.utils.plugin import install_function_dependencies
 from open_webui.utils.redis import get_redis_client
 from open_webui.utils.security_headers import SecurityHeadersMiddleware
 from open_webui.utils.session_pool import cleanup_response, get_session, stream_wrapper
@@ -271,7 +266,6 @@ from open_webui.utils.tools import set_terminal_servers, set_tool_servers
 
 if SAFE_MODE:
     print('SAFE MODE ENABLED')
-    # Functions.deactivate_all_functions() is awaited in lifespan below
 
 logging.basicConfig(stream=sys.stdout, level=GLOBAL_LOG_LEVEL)
 log = logging.getLogger(__name__)
@@ -357,14 +351,6 @@ async def lifespan(app: FastAPI):
         if await create_admin_user(WEBUI_ADMIN_EMAIL, WEBUI_ADMIN_PASSWORD, WEBUI_ADMIN_NAME):
             # Disable signup since we now have an admin
             await Config.upsert({'ui.enable_signup': False})
-
-    if SAFE_MODE:
-        await Functions.deactivate_all_functions()
-
-    # This should be blocking (sync) so functions are not deactivated on first /get_models calls
-    # when the first user lands on the / route.
-    log.info('Installing external dependencies of functions...')
-    await install_function_dependencies()
 
     app.state.redis = get_redis_client(async_mode=True)
 
@@ -823,7 +809,6 @@ app.include_router(memories.router, prefix='/api/v1/memories', tags=['memories']
 app.include_router(folders.router, prefix='/api/v1/folders', tags=['folders'])
 app.include_router(groups.router, prefix='/api/v1/groups', tags=['groups'])
 app.include_router(files.router, prefix='/api/v1/files', tags=['files'])
-app.include_router(functions.router, prefix='/api/v1/functions', tags=['functions'])
 app.include_router(evaluations.router, prefix='/api/v1/evaluations', tags=['evaluations'])
 if ENABLE_ADMIN_ANALYTICS:
     app.include_router(analytics.router, prefix='/api/v1/analytics', tags=['analytics'])
@@ -1194,7 +1179,6 @@ async def chat_completion(
             'assistant_message_id': form_data.pop('assistant_message_id', None),
             'session_id': form_data.pop('session_id', None),
             'folder_id': form_data.pop('folder_id', None),
-            'filter_ids': form_data.pop('filter_ids', []),
             'mcp_server_ids': form_data.get('mcp_server_ids', None),
             'tool_servers': tool_servers,
             'files': form_data.get('files', None),
@@ -1692,7 +1676,6 @@ async def chat_completion(
                             'mcp_server_ids': metadata.get('mcp_server_ids') or [],
                             'skill_ids': metadata.get('skill_ids') or [],
                             'system_prompt': metadata.get('system_prompt'),
-                            'filter_ids': metadata.get('filter_ids') or [],
                             'terminal_id': metadata.get('terminal_id'),
                             'features': metadata.get('features') or {},
                             'variables': metadata.get('variables') or {},
@@ -1995,24 +1978,6 @@ async def chat_completed(request: Request, form_data: dict, user=Depends(get_ver
         )
 
 
-@app.post('/api/chat/actions/{action_id}')
-async def chat_action(request: Request, action_id: str, form_data: dict, user=Depends(get_verified_user)):
-    await verify_chat_ownership(form_data.get('chat_id'), user)
-
-    try:
-        model_item = form_data.pop('model_item', {})
-
-        if model_item.get('direct', False):
-            await _set_direct_model(request, model_item, user)
-
-        return await chat_action_handler(request, action_id, form_data, user)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
-
-
 @app.post('/api/tasks/stop/{task_id}')
 async def stop_task_endpoint(request: Request, task_id: str, user=Depends(get_admin_user)):
     try:
@@ -2181,7 +2146,6 @@ async def get_app_config(request: Request):
                     'enable_public_active_users_count': ENABLE_PUBLIC_ACTIVE_USERS_COUNT,
                     'enable_easter_eggs': ENABLE_EASTER_EGGS,
                     'enable_direct_connections': config.get('direct.enable'),
-                    'enable_plugins': ENABLE_PLUGINS,
                     'enable_folders': config.get('folders.enable'),
                     'folder_max_file_count': config.get('folders.max_file_count'),
                     'enable_channels': config.get('channels.enable'),

@@ -80,6 +80,22 @@ def test_runtime_connection_uses_existing_mcp_shape():
     assert connection['info']['managed'] is True
 
 
+def test_runtime_connection_shares_managed_server_when_grants_are_unspecified():
+    client = ManagedMCPRuntimeClient('http://runtime', 'secret')
+    connection = client.connection(
+        {
+            'id': 'calendar',
+            'enabled': True,
+            'state': 'ready',
+            'access_grants': [],
+        }
+    )
+
+    assert connection['config']['access_grants'] == [
+        {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}
+    ]
+
+
 def test_runtime_token_file_is_supported(tmp_path, monkeypatch):
     token_file = tmp_path / 'token'
     token_file.write_text('file-secret\n')

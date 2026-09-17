@@ -139,7 +139,6 @@
 						continueResponse={() => {}}
 						regenerateResponse={() => {}}
 						mergeResponses={() => {}}
-						chatActionHandler={() => {}}
 					/>
 				{/if}
 			</div>

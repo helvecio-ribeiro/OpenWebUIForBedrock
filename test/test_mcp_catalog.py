@@ -26,6 +26,10 @@ def test_catalog_merges_remote_and_managed_without_exposing_connections():
 
     assert [entry['id'] for entry in catalog] == ['local', 'remote']
     assert catalog[0]['selectable'] is True
+    assert catalog[0]['access_grants'] == [
+        {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}
+    ]
+    assert catalog[1]['access_grants'] == []
     assert all('url' not in entry and 'key' not in entry for entry in catalog)
     assert all('tool_id' not in entry for entry in catalog)
 

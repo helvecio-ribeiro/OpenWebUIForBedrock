@@ -226,6 +226,12 @@
 			return;
 		}
 		aiModelName = modelItem.name ?? modelItem.id;
+		const mcpServerIds = [
+			...new Set([
+				...($settings?.mcpServerIds ?? []),
+				...(modelItem?.info?.meta?.mcpServerIds ?? [])
+			])
+		];
 		const instruction: Record<string, string> = {
 			explain:
 				'Explain the selected passage in clear language. Identify its meaning, relevant background, important terms, and why it matters. Use the page title and URL only as contextual metadata. Clearly distinguish page context from background knowledge. Finish with a concise "Further references" section containing useful topics, search terms, and reputable named sources. Include links only when you are confident they are accurate. Do not invent facts, citations, or URLs.',
@@ -240,6 +246,7 @@
 			model,
 			model_item: modelItem,
 			stream: false,
+			mcp_server_ids: mcpServerIds.length > 0 ? mcpServerIds : undefined,
 			messages: [
 				{ role: 'system', content: instruction[action] ?? instruction.explain },
 				{

@@ -1077,13 +1077,11 @@ async def model_response_handler(request, channel, message, user, db=None):
                 # Resolve model config (same helpers automations use)
                 from open_webui.utils.automations import (
                     _resolve_model_features,
-                    _resolve_model_filter_ids,
                     _resolve_model_mcp_server_ids,
                 )
 
                 mcp_server_ids = _resolve_model_mcp_server_ids(request.app, model_id)
                 features = await _resolve_model_features(request.app, model_id)
-                filter_ids = _resolve_model_filter_ids(request.app, model_id)
 
                 # Build full form_data — same shape as frontend POST.
                 # The channel: prefix routes pipeline events to the
@@ -1107,8 +1105,6 @@ async def model_response_handler(request, channel, message, user, db=None):
                     form_data['mcp_server_ids'] = mcp_server_ids
                 if features:
                     form_data['features'] = features
-                if filter_ids:
-                    form_data['filter_ids'] = filter_ids
 
                 # Call the full chat completion pipeline — streaming,
                 # tools, filters, RAG — everything. The pipeline runs as

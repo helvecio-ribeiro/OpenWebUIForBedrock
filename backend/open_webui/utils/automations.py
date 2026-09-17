@@ -328,14 +328,6 @@ async def _resolve_model_features(app, model_id: str) -> dict:
     return features
 
 
-def _resolve_model_filter_ids(app, model_id: str) -> list[str]:
-    """Read model default filter_ids from model config."""
-    models = getattr(app.state, 'MODELS', {})
-    model = models.get(model_id, {})
-    filter_ids = model.get('info', {}).get('meta', {}).get('defaultFilterIds', [])
-    return list(filter_ids) if filter_ids else []
-
-
 def _resolve_model_terminal_id(app, model_id: str) -> Optional[str]:
     """Read model default terminal_id from model config.
 
@@ -511,7 +503,6 @@ async def execute_automation(app, automation: AutomationModel) -> None:
         # Resolve model defaults (frontend does this, backend doesn't)
         mcp_server_ids = _resolve_model_mcp_server_ids(app, model_id)
         features = await _resolve_model_features(app, model_id)
-        filter_ids = _resolve_model_filter_ids(app, model_id)
 
         # Resolve terminal from model config
         terminal_id = _resolve_model_terminal_id(app, model_id)
@@ -537,8 +528,6 @@ async def execute_automation(app, automation: AutomationModel) -> None:
             form_data['mcp_server_ids'] = mcp_server_ids
         if features:
             form_data['features'] = features
-        if filter_ids:
-            form_data['filter_ids'] = filter_ids
         if terminal_id:
             form_data['terminal_id'] = terminal_id
 

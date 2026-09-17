@@ -50,6 +50,7 @@ from open_webui.utils.misc import (
     stream_chunks_handler,
 )
 from open_webui.utils.payload import (
+    apply_global_system_prompt_at_provider,
     apply_model_params_to_body_openai,
     apply_system_prompt_to_body,
 )
@@ -141,14 +142,16 @@ def openai_reasoning_model_handler(payload):
         payload['max_completion_tokens'] = payload['max_tokens']
         del payload['max_tokens']
 
-    # Handle system role conversion based on model type
-    if payload['messages'][0]['role'] == 'system':
-        model_lower = payload['model'].lower()
-        # Legacy models use "user" role instead of "system"
-        if model_lower.startswith('o1-mini') or model_lower.startswith('o1-preview'):
-            payload['messages'][0]['role'] = 'user'
-        else:
-            payload['messages'][0]['role'] = 'developer'
+    # Handle every leading system instruction, including the independent admin
+    # block inserted at the provider boundary.
+    model_lower = payload['model'].lower()
+    replacement_role = (
+        'user' if model_lower.startswith(('o1-mini', 'o1-preview')) else 'developer'
+    )
+    for message in payload['messages']:
+        if message.get('role') != 'system':
+            break
+        message['role'] = replacement_role
 
     return payload
 
@@ -1026,9 +1029,16 @@ def convert_to_responses_payload(payload: dict) -> dict:
 
         if role == 'system':
             if isinstance(content, str):
-                system_content = content
+                content_text = content
             elif isinstance(content, list):
-                system_content = '\n'.join(p.get('text', '') for p in content if p.get('type') == 'text')
+                content_text = '\n'.join(
+                    p.get('text', '') for p in content if p.get('type') == 'text'
+                )
+            else:
+                content_text = str(content)
+            system_content = '\n\n'.join(
+                part for part in (system_content, content_text) if part
+            )
             continue
 
         # Handle assistant messages with tool_calls (from convert_output_to_messages)
@@ -1225,11 +1235,15 @@ async def generate_chat_completion(
 
             payload = apply_model_params_to_body_openai(params, payload)
             if not bypass_system_prompt:
-                payload = await apply_system_prompt_to_body(system, payload, metadata, user)
+                payload = await apply_system_prompt_to_body(system, payload, metadata, user, append=True)
 
         await check_model_access(user, model_info, bypass_filter)
     else:
         await check_model_access(user, None, bypass_filter)
+
+    payload = await apply_global_system_prompt_at_provider(
+        await Config.get('prompts.global_system', ''), payload, metadata, user
+    )
 
     # Check if model is already in app state cache to avoid expensive get_all_models() call
     models = request.app.state.OPENAI_MODELS

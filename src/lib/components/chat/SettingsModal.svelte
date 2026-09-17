@@ -20,6 +20,7 @@
 	import Usage from './Settings/Usage.svelte';
 	import ArchivedChats from './Settings/ArchivedChats.svelte';
 	import Personalization from './Settings/Personalization.svelte';
+	import MCPTools from './Settings/MCPTools.svelte';
 	import Search from '../icons/Search.svelte';
 	import Connections from './Settings/Connections.svelte';
 	import DatabaseSettings from '../icons/DatabaseSettings.svelte';
@@ -34,6 +35,7 @@
 	import ArchiveBox from '../icons/ArchiveBox.svelte';
 	import ChevronLeft from '../icons/ChevronLeft.svelte';
 	import Keyboard from '../icons/Keyboard.svelte';
+	import Wrench from '../icons/Wrench.svelte';
 	import UsageIcon from '../icons/UsageIcon.svelte';
 	import AdminTabIcon from '$lib/components/admin/Settings/AdminTabIcon.svelte';
 	import AdminGeneral from '$lib/components/admin/Settings/General.svelte';
@@ -138,6 +140,11 @@
 		} mb-0.5`;
 
 	const allSettings: SettingsTab[] = [
+		{
+			id: 'tools',
+			title: 'Tools',
+			keywords: ['tools', 'mcp', 'integrations', 'services']
+		},
 		{
 			id: 'general',
 			title: 'General',
@@ -734,13 +741,6 @@
 				return $config?.features?.enable_direct_connections;
 			}
 
-			if (tab.id === 'tools') {
-				return (
-					$user?.role === 'admin' ||
-					($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers)
-				);
-			}
-
 			if (tab.id === 'interface') {
 				return $user?.role === 'admin' || ($user?.permissions?.settings?.interface ?? true);
 			}
@@ -961,6 +961,19 @@
 							<Keyboard className="size-3.5" strokeWidth="2" />
 							<span>{$i18n.t('Keyboard')}</span>
 						</button>
+					{:else if tabId === 'tools'}
+						<button
+							role="tab"
+							aria-controls="tab-tools"
+							aria-selected={selectedTab === 'tools'}
+							class={tabButtonClass(selectedTab === 'tools')}
+							on:click={() => {
+								selectedTab = 'tools';
+							}}
+						>
+							<Wrench className="size-3.5" strokeWidth="2" />
+							<span>{$i18n.t('Tools')}</span>
+						</button>
 					{:else if tabId === 'connections'}
 						{#if $user?.role === 'admin' || ($user?.role === 'user' && $config?.features?.enable_direct_connections)}
 							<button
@@ -1147,6 +1160,8 @@
 						toast.success($i18n.t('Settings saved successfully!'));
 					}}
 				/>
+			{:else if selectedTab === 'tools'}
+				<MCPTools />
 			{:else if selectedTab === 'audio'}
 				<Audio
 					{saveSettings}

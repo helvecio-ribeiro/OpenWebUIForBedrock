@@ -1141,20 +1141,6 @@ VIEW_FILE_MAX_CHARS = _int_env('VIEW_FILE_MAX_CHARS', 100_000)
 VIEW_FILE_DEFAULT_MAX_CHARS = _int_env('VIEW_FILE_DEFAULT_MAX_CHARS', 10_000)
 
 ####################################
-# TOOLS/FUNCTIONS PIP OPTIONS
-####################################
-
-ENABLE_PLUGINS = os.getenv('ENABLE_PLUGINS', 'True').lower() == 'true'
-
-ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS = (
-    os.getenv('ENABLE_PIP_INSTALL_FRONTMATTER_REQUIREMENTS', 'True').lower() == 'true'
-)
-
-PIP_OPTIONS = os.getenv('PIP_OPTIONS', '').split()
-PIP_PACKAGE_INDEX_OPTIONS = os.getenv('PIP_PACKAGE_INDEX_OPTIONS', '').split()
-
-
-####################################
 # OFFLINE_MODE
 ####################################
 

@@ -65,7 +65,7 @@ export const registerManagedMCPService = (token: string, service: DiscoveredMana
 			package_path: service.package_path,
 			environment,
 			secret_environment: {},
-			access_grants: [],
+			access_grants: [{ principal_type: 'user', principal_id: '*', permission: 'read' }],
 			enabled: true
 		})
 	});

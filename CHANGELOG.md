@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — Lambda WebUI release candidate
+## [Unreleased] - 2026-09-10
 
 ### Added
 
@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - System prompts now merge at request time in administrator → user → folder order without copying
-  the administrator prompt into user settings or duplicating the user prompt.
+  the administrator prompt into user settings or duplicating the user prompt. The shared provider
+  dispatch boundary also enforces the administrator prompt for direct, internal, Browser Action,
+  and tool-continuation requests, including requests with no user System Prompt.
 - MCP services selected during a conversation take effect on the next message; no new chat is
   required. Empty selection produces a normal request with no MCP tool schemas.
 - Voice recognition and TTS playback use the same centered five-bar animation. Exiting Voice Mode
@@ -30,8 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Removed the database-backed Python Tools catalog, CRUD API, executable module loader, persistence,
   sharing controls, and frontend administration paths.
-- Removed legacy Functions, Filters, Actions, Pipelines, OpenAPI-tool, and Valves surfaces from the
-  frontend. Remaining server-side compatibility paths are tracked in `tools_cleanup.md`.
+- Removed legacy Python Functions, Filters, Pipes, chat Actions, function event subscribers,
+  dependency installation, persistence, APIs, and frontend administration paths. Browser Panel
+  Actions remain direct model requests. Pipelines, residual OpenAPI-tool code, and backend Valves
+  compatibility are tracked separately in `tools_cleanup.md`.
 - Removed native Calendar and Notes implementations; Local Calendar is now an optional standalone
   managed MCP package with its own shared SQLite repository.
 

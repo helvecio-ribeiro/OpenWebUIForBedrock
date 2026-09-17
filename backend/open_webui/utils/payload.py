@@ -4,6 +4,8 @@ from typing import Callable, Optional
 from open_webui.utils.misc import (
     add_or_update_system_message,
     deep_update,
+    get_content_from_message,
+    get_system_message,
     replace_system_message_content,
 )
 from open_webui.utils.chat_variables import render_chat_variables, render_user_variables
@@ -54,6 +56,16 @@ async def apply_system_prompt_to_body(
     if not system:
         return form_data
 
+    system = system.strip()
+    existing = get_system_message(form_data.get('messages', []))
+    existing_content = get_content_from_message(existing).strip() if existing else ''
+    if existing_content == system:
+        return form_data
+    if append and existing_content.endswith(f'\n{system}'):
+        return form_data
+    if not append and existing_content.startswith(f'{system}\n'):
+        return form_data
+
     if replace:
         form_data['messages'] = replace_system_message_content(system, form_data.get('messages', []))
     else:
@@ -77,10 +89,42 @@ async def apply_global_system_prompt_to_body(
     if not system or not system.strip():
         return form_data
 
+    system = system.strip()
+    existing = get_system_message(form_data.get('messages', []))
+    existing_content = get_content_from_message(existing).strip() if existing else ''
+    if existing_content == system or existing_content.startswith(f'{system}\n'):
+        return form_data
+
     form_data['messages'] = add_or_update_system_message(
-        system.strip(),
+        system,
         form_data.get('messages', []),
     )
+    return form_data
+
+
+async def apply_global_system_prompt_at_provider(
+    system: Optional[str],
+    form_data: dict,
+    metadata: Optional[dict] = None,
+    user=None,
+) -> dict:
+    """Insert the admin prompt as the first independent provider message."""
+    system = (await resolve_system_prompt(system, metadata, user)).strip()
+    if not system:
+        return form_data
+
+    messages = list(form_data.get('messages', []))
+    for index, message in enumerate(messages):
+        if message.get('role') != 'system':
+            continue
+        content = get_content_from_message(message).strip()
+        if content == system:
+            messages.pop(index)
+        elif content.startswith(f'{system}\n'):
+            messages[index] = {**message, 'content': content[len(system) :].lstrip()}
+        break
+
+    form_data['messages'] = [{'role': 'system', 'content': system}, *messages]
     return form_data
 
 
@@ -249,7 +293,7 @@ def convert_messages_openai_to_ollama(messages: list[dict]) -> list[dict]:
         new_message = {'role': message['role']}
 
         # Preserve Ollama-native 'thinking' field (used by reasoning models,
-        # may be injected by filter inlet functions).
+        # may be injected by request preprocessing).
         if 'thinking' in message:
             new_message['thinking'] = message['thinking']
 

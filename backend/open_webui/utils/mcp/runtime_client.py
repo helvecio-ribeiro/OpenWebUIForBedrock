@@ -75,6 +75,11 @@ class ManagedMCPRuntimeClient:
         await self.request('DELETE', f'/api/servers/{server_id}')
 
     def connection(self, server: dict[str, Any]) -> dict[str, Any]:
+        # Managed local services are installed once for this Open WebUI
+        # instance and are shared with its authenticated users by default.
+        access_grants = server.get('access_grants') or [
+            {'principal_type': 'user', 'principal_id': '*', 'permission': 'read'}
+        ]
         return {
             'type': 'mcp',
             'url': f'{self.base_url}/mcp/{server["id"]}',
@@ -82,7 +87,7 @@ class ManagedMCPRuntimeClient:
             'key': self.token,
             'config': {
                 'enable': server.get('enabled', False) and server.get('state') == 'ready',
-                'access_grants': server.get('access_grants') or [],
+                'access_grants': access_grants,
             },
             'info': {
                 'id': server['id'],
