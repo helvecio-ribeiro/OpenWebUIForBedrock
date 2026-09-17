@@ -13,6 +13,11 @@ RAM makes the frontend build and local speech models more comfortable. Running
 Ollama on the same host requires substantially more RAM or a suitable GPU and
 should be sized for the chosen model.
 
+Do not accept the EC2 launch wizard's 8 GiB root-volume default. Source builds
+temporarily hold Python wheels, the virtual environment, npm packages, and the
+compiled frontend at the same time; 8 GiB is insufficient even when the final
+runtime footprint would fit.
+
 Configure the EC2 security group as follows:
 
 - TCP 22 from an administrator's IP only.
@@ -23,19 +28,55 @@ If Bedrock will be used, attach an EC2 IAM role with only the required Bedrock
 model-listing and invocation permissions. An instance role is preferable to
 putting long-lived AWS access keys in `.env`.
 
-Connect as `ec2-user`, update the instance, and install build/runtime packages:
+Connect as `ec2-user`, update the instance, and install the core build/runtime
+packages:
 
 ```bash
 sudo dnf update -y
 sudo dnf install -y \
   git curl ca-certificates gcc gcc-c++ make openssl-devel libffi-devel \
-  nodejs22 nodejs22-npm ffmpeg-free
+  nodejs22 nodejs22-npm
 
 node --version
 npm --version
+```
+
+`ffmpeg-free` is supplied by the separate Amazon Linux SPAL repository, not the
+base AL2023 repository. SPAL requires AL2023 release `2023.9.20251117` or later.
+Check the installed release first:
+
+```bash
+rpm -q system-release --qf '%{VERSION}\n'
+sudo dnf check-release-update
+```
+
+If the release is older than `2023.9.20251117`, use the specific upgrade command
+printed by `dnf check-release-update` (or replace the instance with the current
+AL2023 AMI), reboot, and check the version again. AWS recommends testing and
+pinning a dated AL2023 release rather than blindly using `--releasever=latest`.
+
+On a compatible release, enable SPAL and install the audio tools:
+
+```bash
+sudo dnf install -y spal-release
+sudo dnf config-manager --enable amazonlinux-spal
+sudo dnf clean metadata
+sudo dnf makecache --refresh --enablerepo=amazonlinux-spal
+sudo dnf --disablerepo='*' --enablerepo=amazonlinux-spal list available ffmpeg-free
+sudo dnf --enablerepo=amazonlinux-spal install -y ffmpeg-free
+
 ffmpeg -version
 ffprobe -version
 ```
+
+If `spal-release` itself cannot be found, the instance is still pinned to an
+older AL2023 repository snapshot. Updating only the package cache will not fix
+that; upgrade to a supported dated AL2023 release or launch a current AMI.
+If the repository-only `list available` command still cannot find
+`ffmpeg-free`, inspect `dnf repolist --all` and
+`/etc/yum.repos.d/amazonlinux-spal.repo`; the repository is not active or its
+metadata could not be downloaded. Do not add a Fedora or an AL2 repository to
+work around that condition.
 
 This project supports Node.js 18.13 through 22.x; Node.js 22 is deliberately
 selected above. `ffprobe` is required for reliable browser-audio transcription.
@@ -50,7 +91,17 @@ sudo useradd --create-home --shell /bin/bash lambdawebui
 sudo git clone https://github.com/helvecio-ribeiro/OpenWebUIForBedrock.git /opt/lambda-webui
 sudo chown -R lambdawebui:lambdawebui /opt/lambda-webui
 sudo -u lambdawebui git -C /opt/lambda-webui checkout <release-tag-or-commit>
+sudo install -d -o lambdawebui -g lambdawebui -m 700 \
+  /opt/lambda-webui/.tmp \
+  /opt/lambda-webui/.uv-cache \
+  /opt/lambda-webui/.npm-cache
+df -h / /opt /tmp
 ```
+
+Keep at least 6–10 GiB free during dependency installation. On some EC2 images,
+`/tmp` is a 2 GiB `tmpfs` even when the EBS volume has ample space. The two
+directories above keep wheel downloads and extraction on the disk-backed `/opt`
+filesystem instead. `/dev/shm` capacity is unrelated to this installation.
 
 Install `uv` and Python 3.12 for the service account, then create the backend
 virtual environment:
@@ -60,27 +111,74 @@ sudo -u lambdawebui -H bash -lc \
   'curl -LsSf https://astral.sh/uv/install.sh | sh'
 
 sudo -u lambdawebui -H bash -lc '
+  set -o pipefail
   export PATH="$HOME/.local/bin:$PATH"
+  export TMPDIR=/opt/lambda-webui/.tmp
+  export UV_CACHE_DIR=/opt/lambda-webui/.uv-cache
+  export UV_CONCURRENT_DOWNLOADS=1
+  export UV_HTTP_CONNECT_TIMEOUT=60
+  export UV_HTTP_TIMEOUT=300
+  export UV_HTTP_RETRIES=10
+
   uv python install 3.12
   uv venv --python 3.12 /opt/lambda-webui/backend/venv
+
   uv pip install --python /opt/lambda-webui/backend/venv/bin/python \
-    -r /opt/lambda-webui/backend/requirements.txt
+    --extra-index-url https://download.pytorch.org/whl/cpu \
+    --refresh-package torch \
+    "torch==2.12.1" \
+    -r /opt/lambda-webui/backend/requirements.txt \
+    2>&1 | tee /opt/lambda-webui/requirements-install.log
 '
 ```
 
+The explicit version and additional PyTorch index deliberately select the CPU
+build. Both must be present in the **same** `uv pip install` transaction: merely
+preinstalling a CPU wheel does not prevent a later unconstrained resolver pass
+from upgrading it. Without the constraint, PyPI can select a newer CUDA build
+and download large `nvidia-*` packages or `triton`, even when the EC2 instance
+has no NVIDIA GPU. The version matches this repository's lockfile. For a GPU
+instance, replace it with the PyTorch version/index matching the installed
+NVIDIA driver and CUDA platform; do not mix arbitrary CUDA wheels into a CPU
+deployment.
+
+The serialized downloads, longer timeouts, and retries make large wheels such
+as `av` and `ctranslate2` more reliable on a small instance. If installation is
+interrupted, rerun the same command against the existing virtual environment;
+do not recreate it merely because one wheel download failed.
+
 Build the frontend. `npm ci` uses the committed lockfile and is preferred over
-`npm install` for a repeatable deployment.
+`npm install` for a repeatable deployment. Keeping npm's cache and temporary
+files under `/opt` avoids filling a small `/tmp` mount.
 
 ```bash
 sudo -u lambdawebui -H bash -lc '
+  set -e
+  export TMPDIR=/opt/lambda-webui/.tmp
+  export npm_config_cache=/opt/lambda-webui/.npm-cache
+
   cd /opt/lambda-webui
-  npm ci
+  npm ci --no-audit --no-fund
+  test -f node_modules/@sveltejs/kit/src/core/utils.js
   npm run build
 '
 ```
 
 The backend serves the generated `build/` directory; Node.js is not needed by
-the running service after this step.
+the running service after this step. After verifying that the build completed,
+you may recover the frontend installation space with:
+
+```bash
+sudo rm -rf \
+  /opt/lambda-webui/node_modules \
+  /opt/lambda-webui/.svelte-kit \
+  /opt/lambda-webui/.npm-cache
+```
+
+Keep `/opt/lambda-webui/build`; it is the production frontend served by the
+backend. Run `npm ci` again before a future frontend rebuild. A missing
+`node_modules/@sveltejs/kit/src/core/utils.js` means the dependency installation
+was incomplete, normally because storage ran out; do not patch the import.
 
 ## 3. Configure Lambda WebUI
 
@@ -287,6 +385,8 @@ sudo journalctl -u lambda-webui -f
 sudo journalctl -u lambda-webui-mcp -f
 ss -lntp | grep -E ':(8080|9090|8091|8880|11434)\b'
 curl --fail http://127.0.0.1:8080/health
+df -h / /opt /tmp
+df -i / /opt /tmp
 ```
 
 - A blank UI after an update usually means `npm run build` was not rerun.
@@ -295,12 +395,32 @@ curl --fail http://127.0.0.1:8080/health
 - MCP services shown as installed but absent from model requests must also be
   enabled by that user under **User Settings → Tools**.
 - Missing `ffprobe` can cause otherwise valid WAV uploads to fail before Whisper.
+- A failure downloading `nvidia-cusparse`, `triton`, or another GPU-oriented
+  wheel on a CPU instance means the requirements transaction did not constrain
+  `torch` to the documented CPU build. Rerun the complete command above with the
+  existing virtual environment; `uv` resumes safely and replaces the unsuitable
+  resolution.
+- Failures that move between legitimate packages such as `ctranslate2` and
+  `av` usually indicate exhausted storage or an unreliable download, not several
+  incompatible dependencies. Inspect the final `Caused by:` line in
+  `/opt/lambda-webui/requirements-install.log` and check both blocks and inodes
+  with the commands above.
+- To recover space after a failed dependency attempt, run
+  `sudo -u lambdawebui -H /home/lambdawebui/.local/bin/uv cache clean` and
+  `sudo dnf clean all`. Removing `requirements-install.log` frees only a small
+  text file; partial wheels in the uv cache are normally much larger. Cache and
+  log deletion is permanent but does not remove application data.
+- A 2 GiB `/tmp` mount is not enough reason to resize it: the documented
+  `TMPDIR` and `UV_CACHE_DIR` move installation work to `/opt`. If `/opt` is on
+  the same full root filesystem, expand the EBS volume instead.
 - If the frontend build is killed, temporarily use a larger instance or add
   swap; do not leave a production host dependent on undersized swap-backed RAM.
 
 ## Platform references
 
 - [Amazon Linux 2023 package management](https://docs.aws.amazon.com/linux/al2023/ug/package-management.html)
+- [Configure the Amazon Linux SPAL repository](https://docs.aws.amazon.com/linux/al2023/ug/configure-spal-repository.html)
+- [Versioned Amazon Linux 2023 upgrades](https://docs.aws.amazon.com/linux/al2023/ug/updating.html)
 - [Node.js packages in Amazon Linux 2023](https://docs.aws.amazon.com/linux/al2023/ug/nodejs.html)
 - [EC2 IAM roles and instance profiles](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html)
 - [EC2 security-group rule examples](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/security-group-rules-reference.html)
