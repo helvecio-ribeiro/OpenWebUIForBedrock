@@ -8,10 +8,12 @@ Ollama, MCP, Calendar, and TTS ports stay on loopback.
 ## 1. Choose and prepare the instance
 
 Use the current **Amazon Linux 2023** AMI. For Bedrock or another remote model
-provider, start with 2 vCPU, 4 GiB RAM, and at least 30 GiB of gp3 storage; 8 GiB
-RAM makes the frontend build and local speech models more comfortable. Running
-Ollama on the same host requires substantially more RAM or a suitable GPU and
-should be sized for the chosen model.
+provider, start with 2 vCPU and at least 30 GiB of gp3 storage. The production
+frontend build needs an 8 GiB Node.js heap, so use 16 GiB RAM for the simplest
+installation path. An 8 GiB instance can build with additional swap, but a 4
+GiB instance is not recommended for building this source tree. Running Ollama
+on the same host requires substantially more RAM or a suitable GPU and should
+be sized for the chosen model.
 
 Do not accept the EC2 launch wizard's 8 GiB root-volume default. Source builds
 temporarily hold Python wheels, the virtual environment, npm packages, and the
@@ -156,6 +158,7 @@ sudo -u lambdawebui -H bash -lc '
   set -e
   export TMPDIR=/opt/lambda-webui/.tmp
   export npm_config_cache=/opt/lambda-webui/.npm-cache
+  export NODE_OPTIONS=--max-old-space-size=8192
 
   cd /opt/lambda-webui
   npm ci --no-audit --no-fund
@@ -220,6 +223,21 @@ without a reverse proxy, set `HOST=0.0.0.0`, use
 and temporarily allow TCP 8080 in the security group. This is not suitable for
 remote Voice Mode because browsers require HTTPS for microphone access.
 
+For automatic English/Spanish recognition in Voice Mode, add:
+
+```dotenv
+WHISPER_MODEL=base
+WHISPER_COMPUTE_TYPE=int8
+WHISPER_MULTILINGUAL=false
+```
+
+Do not set `WHISPER_LANGUAGE`: an unset value makes faster-whisper detect the
+language at the beginning of each utterance. The model name must not end in
+`.en`, because those variants are English-only. A user's explicit
+Speech-to-Text language selection still overrides automatic detection when the
+server does not force `WHISPER_LANGUAGE`. Restart `lambda-webui` after changing
+these values; the frontend and TTS service do not need to be restarted.
+
 ### Bedrock
 
 For an EC2 instance role, enable Bedrock without adding access keys:
@@ -231,7 +249,12 @@ BEDROCK_CONVERSE_MODEL_PREFIXES=ai21.jamba-,amazon.nova-,anthropic.claude-,coher
 ```
 
 The AWS SDK automatically uses the instance-role credential provider. Confirm
-that the desired models are available in the configured region. The allowlist
+that the desired models are available in the configured region. `AWS_REGION` is
+the only credential-related setting required at application startup. Leave
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` unset; empty
+values are ignored before boto3 creates its sessions. If the instance has no IAM
+role or another standard AWS credential provider, startup succeeds but model
+discovery and invocation fail with an AWS credential error. The allowlist
 filters discovery; it does not grant AWS permissions.
 
 ### Ollama (optional)
@@ -415,6 +438,11 @@ df -i / /opt /tmp
   the same full root filesystem, expand the EBS volume instead.
 - If the frontend build is killed, temporarily use a larger instance or add
   swap; do not leave a production host dependent on undersized swap-backed RAM.
+- `JavaScript heap out of memory` while Vite reports a package such as
+  `missing-exports-condition` identifies Node's memory ceiling, not a missing
+  application export. Confirm that the build shell contains
+  `NODE_OPTIONS=--max-old-space-size=8192` and that RAM plus swap has enough
+  headroom for that heap and the operating system.
 
 ## Platform references
 

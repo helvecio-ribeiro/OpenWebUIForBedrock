@@ -41,6 +41,10 @@ from starsessions import (
 from starsessions.stores.redis import RedisStore
 
 from open_webui.config import (
+    AUDIO_TTS_DEFAULT_LANGUAGE,
+    AUDIO_TTS_ENGINE,
+    AUDIO_TTS_LANGUAGE_VOICES,
+    AUDIO_TTS_VOICE,
     BYPASS_ADMIN_ACCESS_CONTROL,
     CACHE_DIR,
     CORS_ALLOW_ORIGIN,
@@ -62,8 +66,6 @@ from open_webui.config import (
     KOKORO_DEFAULT_VOICE,
     KOKORO_DEVICE,
     KOKORO_PRELOAD_DTYPE,
-    AUDIO_TTS_ENGINE,
-    AUDIO_TTS_VOICE,
     OAUTH_PROVIDERS,
     ONEDRIVE_CLIENT_ID_BUSINESS,
     ONEDRIVE_CLIENT_ID_PERSONAL,
@@ -363,6 +365,7 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(periodic_usage_pool_cleanup())
     asyncio.create_task(periodic_session_pool_cleanup())
+    asyncio.create_task(audio.preload_configured_tts_voices())
 
     from open_webui.utils.automations import scheduler_worker_loop
 
@@ -2172,6 +2175,8 @@ async def get_app_config(request: Request):
                     'force_audio_tts_config': FORCE_AUDIO_TTS_CONFIG,
                     'forced_audio_tts_engine': AUDIO_TTS_ENGINE,
                     'forced_audio_tts_voice': AUDIO_TTS_VOICE,
+                    'forced_audio_tts_language_voices': AUDIO_TTS_LANGUAGE_VOICES,
+                    'audio_tts_default_language': AUDIO_TTS_DEFAULT_LANGUAGE,
                     'kokoro_preload_dtype': KOKORO_PRELOAD_DTYPE,
                     'kokoro_default_voice': KOKORO_DEFAULT_VOICE,
                     'kokoro_device': KOKORO_DEVICE,

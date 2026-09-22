@@ -1601,6 +1601,39 @@ AUDIO_TTS_MODEL = os.getenv('AUDIO_TTS_MODEL', 'tts-1')
 
 AUDIO_TTS_VOICE = os.getenv('AUDIO_TTS_VOICE', 'alloy')
 
+audio_tts_language_voices = os.getenv('AUDIO_TTS_LANGUAGE_VOICES', '')
+try:
+    audio_tts_language_voices = json.loads(audio_tts_language_voices) if audio_tts_language_voices else {}
+except json.JSONDecodeError:
+    log.warning('Invalid AUDIO_TTS_LANGUAGE_VOICES JSON; multilingual TTS is disabled')
+    audio_tts_language_voices = {}
+if not isinstance(audio_tts_language_voices, dict):
+    log.warning('AUDIO_TTS_LANGUAGE_VOICES must be a JSON object; multilingual TTS is disabled')
+    audio_tts_language_voices = {}
+AUDIO_TTS_LANGUAGE_VOICES = {
+    str(language).lower(): voice.strip()
+    for language, voice in audio_tts_language_voices.items()
+    if str(language).lower() in {'en', 'es', 'pt'}
+    and isinstance(voice, str)
+    and re.fullmatch(r'[a-z][fm]_[a-z0-9_]+', voice.strip().lower())
+}
+AUDIO_TTS_DEFAULT_LANGUAGE = os.getenv('AUDIO_TTS_DEFAULT_LANGUAGE', 'en').lower()
+if AUDIO_TTS_DEFAULT_LANGUAGE not in {'en', 'es', 'pt'}:
+    log.warning('Invalid AUDIO_TTS_DEFAULT_LANGUAGE; falling back to en')
+    AUDIO_TTS_DEFAULT_LANGUAGE = 'en'
+audio_tts_preload_voices = os.getenv('AUDIO_TTS_PRELOAD_VOICES')
+AUDIO_TTS_PRELOAD_VOICES = list(
+    dict.fromkeys(
+        voice.strip()
+        for voice in (
+            audio_tts_preload_voices.split(',')
+            if audio_tts_preload_voices is not None
+            else AUDIO_TTS_LANGUAGE_VOICES.values()
+        )
+        if voice.strip()
+    )
+)
+
 AUDIO_TTS_SPLIT_ON = os.getenv('AUDIO_TTS_SPLIT_ON', 'punctuation')
 
 # Treat the AUDIO_TTS_* environment variables as authoritative instead of only

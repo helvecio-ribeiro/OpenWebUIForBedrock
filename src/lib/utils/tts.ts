@@ -1,5 +1,37 @@
 const sentenceEnd = /[.!?]$/;
 
+export type SupportedTTSLanguage = 'en' | 'es' | 'pt';
+
+export const normalizeTTSLanguage = (locale?: string | null): SupportedTTSLanguage | null => {
+	const language = locale?.trim().toLowerCase().split(/[-_]/, 1)[0];
+	return language === 'en' || language === 'es' || language === 'pt' ? language : null;
+};
+
+/** Resolve a browser fallback without treating it as an explicit user choice. */
+export const getPreferredTTSLanguage = (
+	interfaceLocale?: string | null,
+	browserLocales: readonly string[] = typeof navigator === 'undefined' ? [] : navigator.languages
+): SupportedTTSLanguage => {
+	const interfaceLanguage = normalizeTTSLanguage(interfaceLocale);
+	if (interfaceLanguage) return interfaceLanguage;
+
+	for (const locale of browserLocales) {
+		const language = normalizeTTSLanguage(locale);
+		if (language) return language;
+	}
+	return 'en';
+};
+
+/** Add a streaming TTS fragment to the message-level language context. */
+export const appendTTSLanguageContext = (
+	context: string,
+	fragment: string,
+	maxLength = 8000
+): string => {
+	const combined = `${context.trim()} ${fragment.trim()}`.trim();
+	return combined.length <= maxLength ? combined : combined.slice(-maxLength).trimStart();
+};
+
 const finishSentence = (value: string) => {
 	const text = value.trim().replace(/[,:;]+$/, '');
 	return text && !sentenceEnd.test(text) ? `${text}.` : text;

@@ -15,6 +15,7 @@
 	import { getTerminalServers } from '$lib/apis/terminal';
 	import { getUserSettings } from '$lib/apis/users';
 	import { setTextScale } from '$lib/utils/text-scale';
+	import { getPreferredTTSLanguage } from '$lib/utils/tts';
 
 	import { WEBUI_VERSION, WEBUI_API_BASE_URL } from '$lib/constants';
 	import { compareVersion } from '$lib/utils';
@@ -106,13 +107,18 @@
 		if (userSettings?.ui) {
 			const uiSettings = userSettings.ui;
 			if ($config?.features?.force_audio_tts_config) {
+				const preferredLanguage = getPreferredTTSLanguage(localStorage.locale);
+				const forcedVoice =
+					$config.features.forced_audio_tts_language_voices?.[preferredLanguage] ??
+					$config.features.forced_audio_tts_voice ??
+					'';
 				uiSettings.audio = {
 					...uiSettings.audio,
 					tts: {
 						...uiSettings.audio?.tts,
 						engine: $config.features.forced_audio_tts_engine ?? '',
-						voice: $config.features.forced_audio_tts_voice ?? '',
-						defaultVoice: $config.features.forced_audio_tts_voice ?? ''
+						voice: forcedVoice,
+						defaultVoice: forcedVoice
 					}
 				};
 			} else if ($config?.features?.enable_kokoro_preload) {

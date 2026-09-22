@@ -101,7 +101,12 @@ export const synthesizeOpenAISpeech = async (
 	token: string = '',
 	speaker: string = 'alloy',
 	text: string = '',
-	model?: string
+	model?: string,
+	options: {
+		language?: 'en' | 'es' | 'pt';
+		preferredLanguage?: 'en' | 'es' | 'pt';
+		languageContext?: string;
+	} = {}
 ) => {
 	let error = null;
 
@@ -114,7 +119,10 @@ export const synthesizeOpenAISpeech = async (
 		body: JSON.stringify({
 			input: text,
 			voice: speaker,
-			...(model && { model })
+			...(model && { model }),
+			...(options.language ? { language: options.language } : {}),
+			...(options.preferredLanguage ? { preferred_language: options.preferredLanguage } : {}),
+			...(options.languageContext ? { language_context: options.languageContext } : {})
 		})
 	})
 		.then(async (res) => {

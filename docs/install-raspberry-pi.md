@@ -137,9 +137,16 @@ For Bedrock, add:
 ```dotenv
 ENABLE_BEDROCK=true
 AWS_REGION=us-east-1
+BEDROCK_CONVERSE_MODEL_PREFIXES=ai21.jamba-,amazon.nova-,anthropic.claude-,cohere.command-,deepseek.,google.gemma-,meta.llama,minimax.,mistral.,moonshot.,nvidia.,openai.,qwen.,writer.palmyra-,xai.grok-,zai.glm-
+```
+
+`AWS_REGION` is the only credential-related setting required at application
+startup. A Raspberry Pi normally has no instance profile, so configure a
+standard boto3 credential provider or add a dedicated credential set:
+
+```dotenv
 AWS_ACCESS_KEY_ID=<dedicated-access-key>
 AWS_SECRET_ACCESS_KEY=<dedicated-secret-key>
-BEDROCK_CONVERSE_MODEL_PREFIXES=ai21.jamba-,amazon.nova-,anthropic.claude-,cohere.command-,deepseek.,google.gemma-,meta.llama,minimax.,mistral.,moonshot.,nvidia.,openai.,qwen.,writer.palmyra-,xai.grok-,zai.glm-
 ```
 
 Use a dedicated least-privilege IAM principal and protect `.env`. Temporary
@@ -273,6 +280,24 @@ WEBUI_AUTH_COOKIE_SECURE=true
 ```
 
 Restart the service after editing `.env`.
+
+### Automatic Whisper language detection
+
+To accept English and Spanish Voice Mode input without a language toggle, use
+the multilingual model and leave `WHISPER_LANGUAGE` unset:
+
+```dotenv
+WHISPER_MODEL=base
+WHISPER_COMPUTE_TYPE=int8
+WHISPER_MULTILINGUAL=false
+```
+
+Here `WHISPER_MULTILINGUAL=false` means one language detection at the beginning
+of each recording; it does not make the model English-only. Avoid model names
+ending in `.en`. Users can still force `en` or `es` in their Speech-to-Text
+settings, which is useful for very short utterances that are difficult to
+classify. Restart `lambda-webui` after changing these settings. No MCP, frontend,
+or Kokoro restart is required.
 
 ## 8. Operations, backups, and Pi-specific checks
 

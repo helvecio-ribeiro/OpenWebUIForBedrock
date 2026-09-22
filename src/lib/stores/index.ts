@@ -319,6 +319,11 @@ type Config = {
 		enable_version_update_check: boolean;
 		enable_pyodide_file_persistence?: boolean;
 		enable_kokoro_preload?: boolean;
+		force_audio_tts_config?: boolean;
+		forced_audio_tts_engine?: string;
+		forced_audio_tts_voice?: string;
+		forced_audio_tts_language_voices?: Partial<Record<'en' | 'es', string>>;
+		audio_tts_default_language?: 'en' | 'es';
 		kokoro_preload_dtype?: 'fp32' | 'fp16' | 'q8' | 'q4' | 'q4f16';
 		kokoro_default_voice?: string;
 		kokoro_device?: 'auto' | 'webgpu' | 'wasm';

@@ -56,7 +56,7 @@
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 	import OutputEditView from './OutputEditView.svelte';
 	import { getOutputText, replaceOutputMessageText, type OutputItem } from './structuredOutput';
-	import { getSpeechText } from '$lib/utils/tts';
+	import { getPreferredTTSLanguage, getSpeechText } from '$lib/utils/tts';
 
 	interface MessageType {
 		id: string;
@@ -233,7 +233,12 @@
 
 	const getVoiceId = () => {
 		if ($config.features?.force_audio_tts_config) {
-			return $config.features.forced_audio_tts_voice ?? $config.audio.tts.voice;
+			const preferredLanguage = getPreferredTTSLanguage(localStorage.locale);
+			return (
+				$config?.features.forced_audio_tts_language_voices?.[preferredLanguage] ??
+				$config?.features.forced_audio_tts_voice ??
+				''
+			);
 		}
 		if ($config.features?.enable_kokoro_preload) {
 			return $config.features.kokoro_default_voice ?? 'bf_emma';
@@ -342,14 +347,21 @@
 				for (const [, sentence] of messageContentParts.entries()) {
 					if (signal.aborted) return;
 
-					const res = await synthesizeOpenAISpeech(localStorage.token, voiceId, sentence).catch(
-						(error) => {
-							console.error(error);
-							toast.error(`${error}`);
-							speaking = false;
-							loadingSpeech = false;
+					const res = await synthesizeOpenAISpeech(
+						localStorage.token,
+						voiceId,
+						sentence,
+						undefined,
+						{
+							preferredLanguage: getPreferredTTSLanguage(localStorage.locale),
+							languageContext: content.slice(0, 8000)
 						}
-					);
+					).catch((error) => {
+						console.error(error);
+						toast.error(`${error}`);
+						speaking = false;
+						loadingSpeech = false;
+					});
 
 					if (signal.aborted) return;
 

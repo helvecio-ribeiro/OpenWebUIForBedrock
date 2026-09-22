@@ -33,7 +33,7 @@ This fork is not intended to remain directly upgrade-compatible with upstream Op
 | Calendar         | Native UI, API routes, models, database tables, permissions, flags, alerts, and built-in model tools removed.                                     | The optional **Local Calendar** MCP owns a single shared SQLite calendar, MCP tools, and a loopback REST API.                                                 |
 | Notes            | Native UI, API routes, models, database tables, permissions, flags, collaboration code, and built-in model tools removed.                         | No replacement is currently provided. Use chats, files, knowledge collections, or add a purpose-built local MCP package if persistent notes become necessary. |
 | Python Tools     | Database-backed executable Python Tools, CRUD/import/export APIs, dynamic loading, sharing permissions, and compatibility request fields removed. | Standard MCP servers are the sole extension path for model-callable external tools. Generic provider tool-call execution remains because MCP depends on it.   |
-| Python Functions | Function models, Filters, Pipes, chat Actions, event subscribers, dependency installation, APIs, persistence, and administration UI removed.      | Standard MCP servers provide model-callable extensions. Browser Panel Actions remain direct model requests and are unrelated to Python Functions.            |
+| Python Functions | Function models, Filters, Pipes, chat Actions, event subscribers, dependency installation, APIs, persistence, and administration UI removed.      | Standard MCP servers provide model-callable extensions. Browser Panel Actions remain direct model requests and are unrelated to Python Functions.             |
 
 Alembic retains no-op markers for the historical revision IDs so an existing installation can still traverse the migration chain. Cleanup migrations permanently remove the former Calendar, Notes, Python Tool, and Python Function tables and configuration. They do not migrate data from removed features; take a database backup before upgrading an installation that still contains that data.
 
@@ -275,14 +275,20 @@ Bedrock support is disabled by default. Add the following to `.env` in the repos
 ```env
 ENABLE_BEDROCK=true
 AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=your-access-key-id
-AWS_SECRET_ACCESS_KEY=your-secret-access-key
 BEDROCK_CONVERSE_MODEL_PREFIXES=ai21.jamba-,amazon.nova-,anthropic.claude-,cohere.command-,deepseek.,google.gemma-,meta.llama,minimax.,mistral.,moonshot.,nvidia.,openai.,qwen.,writer.palmyra-,xai.grok-,zai.glm-
 ```
 
-For temporary AWS credentials, also add:
+`AWS_REGION` is the only credential-related value required by Lambda WebUI at
+startup. When explicit credentials are absent or blank, boto3 uses its standard
+credential-provider chain. On EC2, attach a least-privilege IAM role to the
+instance and omit all three credential variables from `.env`.
+
+For a local static or temporary credential set instead, add both key values;
+temporary credentials also require the session token:
 
 ```env
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
 AWS_SESSION_TOKEN=your-session-token
 ```
 
@@ -333,7 +339,13 @@ in AWS's model/API compatibility documentation. A prefix may cover non-chat
 models from the same family, but the required text input/output checks keep
 those models out of the selector.
 
-The backend loads these values at startup and passes them explicitly to boto3. The access key and secret must belong to the same active AWS credential set. The AWS identity needs permission to list models and inference profiles:
+The backend removes empty explicit credential values before creating each boto3
+session. Populated values are passed explicitly; otherwise boto3 can resolve an
+EC2 instance profile, shared AWS configuration, container credentials, or
+another supported provider. If no provider supplies credentials, startup still
+succeeds, but Bedrock discovery and invocation fail with an AWS credential
+error. The resolved AWS identity needs permission to list models and inference
+profiles:
 
 ```json
 {
@@ -361,21 +373,36 @@ The upstream Voice Mode implementation has been adapted for long-running, hands-
 - Silence detection ends a confirmed utterance promptly, while hysteresis prevents normal variations in speaking volume from chopping it prematurely.
 - The microphone is restored after every model response, including TTS synthesis or playback failure, so a failed audio response cannot leave the call stuck waiting.
 - Synthesized sentences are produced and played through a promise-based FIFO pipeline. Each item is played once and awaited to completion rather than repeatedly polling and re-enqueuing cache entries.
+- Streaming Voice Mode accumulates language context for each assistant message while continuing to synthesize sentence-sized chunks. Later short or ambiguous sentences therefore retain the language and voice established by the response instead of falling back to the browser locale.
 - Voice Mode playback is isolated from the normal message audio queue, preventing unrelated queue state from truncating or replacing the active response.
 - During TTS playback, the waiting dots are replaced with a five-bar waveform driven by the actual audio signal, with the tallest bars centered.
 - Speech recognition uses the same centered five-bar visual language, driven by live microphone levels, so listening and playback states are visually consistent.
 - Rich display text and speech text are separated. Completed assistant messages persist a `speechContent` projection, and both Voice Mode and manual read-aloud prefer it while the UI retains the original Markdown. The projection removes non-speech code/details, converts headings and lists into sentences, and rewrites common structured fields such as `Date`, `Time`, and `Location` into natural spoken phrases. Older messages without the field are projected when played.
 - A complete utterance of “exit”, “exit voice mode”, “close voice mode”, “end voice conversation”, or “stop listening” is handled locally as a Voice Mode control command. It is not sent to the model: microphone activation is muted, the client speaks a deterministic “Goodbye,” and Voice Mode closes only after that TTS playback finishes. Exiting also collapses the right-side Controls panel. Longer sentences that merely contain those words do not trigger exit.
 
-For low-latency local speech recognition, the example environment uses Whisper `base`, English-only transcription, greedy decoding, and `int8` computation:
+For low-latency bilingual speech recognition, the example environment uses the multilingual Whisper `base` model, automatic per-utterance language detection, greedy decoding, and `int8` computation:
 
 ```env
 WHISPER_MODEL=base
 WHISPER_COMPUTE_TYPE=int8
-WHISPER_LANGUAGE=en
+WHISPER_MULTILINGUAL=false
 ```
 
-Remove `WHISPER_LANGUAGE` when automatic language detection is required. These defaults favor conversational latency over maximum transcription accuracy; use a larger model if accuracy is more important than response time.
+Leave `WHISPER_LANGUAGE` unset to detect English or Spanish at the beginning of every voice-mode utterance. Set it explicitly only when an installation intentionally supports one input language. These defaults favor conversational latency over maximum transcription accuracy; use a larger multilingual model if accuracy is more important than response time.
+
+#### Whisper automatic language detection
+
+Local faster-whisper selects its input language in this order:
+
+1. `WHISPER_LANGUAGE`, when set by the server administrator. This forces the same language for every user and overrides the language submitted by the browser.
+2. The user's **Settings → Audio → Speech-to-Text → Language** value, when one is selected.
+3. Whisper automatic detection when both values are empty.
+
+For an English/Spanish installation, use a multilingual model name such as `base`, not its English-only `base.en` variant, and leave both language settings empty. Voice Mode sends each completed utterance as a separate recording, so Whisper detects the language again whenever the user takes another turn. The backend log records the detected ISO language code and confidence, for example `Detected language 'es' with probability 0.98`.
+
+`WHISPER_MULTILINGUAL=false` still permits automatic selection among languages; it means that Whisper detects once at the start of the recording. Setting it to `true` asks faster-whisper to repeat language detection across segments within the same recording and is useful mainly for longer recordings that switch languages internally. It is normally unnecessary for short Voice Mode turns.
+
+Very short or ambiguous utterances can be harder to classify. If a user consistently speaks one language, selecting `en` or `es` in their Speech-to-Text settings improves accuracy and latency. After changing `WHISPER_LANGUAGE`, `WHISPER_MODEL`, or `WHISPER_MULTILINGUAL`, restart the backend; no frontend or Kokoro restart is needed.
 
 ### Preload browser Kokoro TTS
 
@@ -408,10 +435,22 @@ AUDIO_TTS_OPENAI_API_BASE_URL=http://127.0.0.1:8880/v1
 AUDIO_TTS_OPENAI_API_KEY=not-needed
 AUDIO_TTS_MODEL=kokoro
 AUDIO_TTS_VOICE=bf_emma
+AUDIO_TTS_DEFAULT_LANGUAGE=en
+AUDIO_TTS_LANGUAGE_VOICES='{"en":"bf_emma","es":"ef_dora","pt":"pf_dora"}'
+AUDIO_TTS_PRELOAD_VOICES=bf_emma,ef_dora,pf_dora
 AUDIO_TTS_OPENAI_PARAMS='{"response_format":"mp3","speed":1.0}'
 ```
 
 `FORCE_AUDIO_TTS_CONFIG=true` makes these server-side settings authoritative over persisted administrator and user TTS selections. If Open WebUI also runs in Compose, attach both services to the same Compose network and use `http://kokoro-tts:8880/v1` instead. Set `KOKORO_FASTAPI_TAG` to a tested release tag rather than relying on `latest` for a stable deployment. The first service start downloads or initializes its model; wait for readiness before testing Voice Mode.
+
+`AUDIO_TTS_LANGUAGE_VOICES` enables deterministic multilingual routing for the
+local API. Lambda WebUI detects English, Spanish, or Portuguese from the complete assistant
+response before it is split into playback chunks. An explicit request language
+wins; otherwise the interface/browser locale is used for short ambiguous text,
+followed by `AUDIO_TTS_DEFAULT_LANGUAGE`. The resolved voice is included in the
+speech-cache key. `AUDIO_TTS_PRELOAD_VOICES` warms all configured voices in the background
+when the backend starts. Browser Kokoro.js remains English-only; use the local
+Kokoro-FastAPI engine for Spanish (`ef_dora`) and Brazilian Portuguese (`pf_dora`).
 
 #### Native Kokoro installation with `uv`
 
@@ -453,7 +492,8 @@ systemctl --user status kokoro-fastapi
 journalctl --user -u kokoro-fastapi -n 100 --no-pager
 ```
 
-Verify that `bf_emma` is installed and synthesize a playable sample:
+Verify that `bf_emma`, `ef_dora`, and `pf_dora` are installed and synthesize
+playable English, Spanish, and Brazilian Portuguese samples:
 
 ```bash
 curl -fsS http://127.0.0.1:8880/v1/audio/voices
@@ -461,7 +501,17 @@ curl -fsS http://127.0.0.1:8880/v1/audio/speech \
   -H 'Content-Type: application/json' \
   -d '{"model":"kokoro","voice":"bf_emma","input":"Kokoro is ready.","response_format":"mp3","speed":1}' \
   -o /tmp/kokoro-smoke-test.mp3
+curl -fsS http://127.0.0.1:8880/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"kokoro","voice":"ef_dora","input":"La voz en español está lista.","response_format":"mp3","speed":1}' \
+  -o /tmp/kokoro-smoke-test-es.mp3
+curl -fsS http://127.0.0.1:8880/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"kokoro","voice":"pf_dora","input":"A voz em português está pronta.","response_format":"mp3","speed":1}' \
+  -o /tmp/kokoro-smoke-test-pt.mp3
 ffplay -nodisp -autoexit /tmp/kokoro-smoke-test.mp3
+ffplay -nodisp -autoexit /tmp/kokoro-smoke-test-es.mp3
+ffplay -nodisp -autoexit /tmp/kokoro-smoke-test-pt.mp3
 ```
 
 The first synthesis can be slower because it loads and warms the model. Compare warm requests only when evaluating conversational latency.
@@ -470,11 +520,11 @@ The first synthesis can be slower because it loads and warms the model. Compare 
 
 The fork applies audio settings in this order:
 
-| Priority | Condition                     | Effective behavior                                                                                                        |
-| -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 1        | `FORCE_AUDIO_TTS_CONFIG=true` | The backend `AUDIO_TTS_*` values override administrator configuration, user settings, and model-specific voice selection. |
-| 2        | `ENABLE_KOKORO_PRELOAD=true`  | The browser uses Kokoro.js with the configured dtype, device, and default voice.                                          |
-| 3        | Neither enabled               | Normal Open WebUI administrator, user, and model settings apply.                                                          |
+| Priority | Condition                     | Effective behavior                                                                                                                                                       |
+| -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1        | `FORCE_AUDIO_TTS_CONFIG=true` | The backend `AUDIO_TTS_*` values, including the optional language-to-voice map, override administrator configuration, user settings, and model-specific voice selection. |
+| 2        | `ENABLE_KOKORO_PRELOAD=true`  | The browser uses Kokoro.js with the configured dtype, device, and default voice.                                                                                         |
+| 3        | Neither enabled               | Normal Open WebUI administrator, user, and model settings apply.                                                                                                         |
 
 Do not enable browser preload when forcing the local API unless browser Kokoro is deliberately required as a separate option. Environment changes are read when the backend starts; restart the backend and hard-refresh authenticated browser sessions after changing them.
 

@@ -1,6 +1,47 @@
 import { describe, expect, it } from 'vitest';
 
-import { getSpeechText, isVoiceExitCommand, VOICE_EXIT_ACKNOWLEDGEMENT } from './tts';
+import {
+	appendTTSLanguageContext,
+	getPreferredTTSLanguage,
+	getSpeechText,
+	isVoiceExitCommand,
+	normalizeTTSLanguage,
+	VOICE_EXIT_ACKNOWLEDGEMENT
+} from './tts';
+
+describe('TTS locale defaults', () => {
+	it('normalizes English, Spanish, and Portuguese browser locales', () => {
+		expect(normalizeTTSLanguage('en-US')).toBe('en');
+		expect(normalizeTTSLanguage('es_MX')).toBe('es');
+		expect(normalizeTTSLanguage('pt-BR')).toBe('pt');
+		expect(normalizeTTSLanguage('fr-FR')).toBeNull();
+	});
+
+	it('prefers the interface locale and then the browser language list', () => {
+		expect(getPreferredTTSLanguage('es-ES', ['en-US'])).toBe('es');
+		expect(getPreferredTTSLanguage('pt-BR', ['en-US'])).toBe('pt');
+		expect(getPreferredTTSLanguage('fr-FR', ['es-MX', 'en-US'])).toBe('es');
+		expect(getPreferredTTSLanguage(null, ['fr-FR'])).toBe('en');
+	});
+});
+
+describe('streaming TTS language context', () => {
+	it('keeps earlier language evidence when a later fragment is ambiguous', () => {
+		const first = appendTTSLanguageContext('', 'Claro, posso ajudar em português do Brasil.');
+		const second = appendTTSLanguageContext(
+			first,
+			'Se tiver alguma pergunta ou precisar de assistência, sinta-se à vontade para perguntar.'
+		);
+
+		expect(second).toBe(
+			'Claro, posso ajudar em português do Brasil. Se tiver alguma pergunta ou precisar de assistência, sinta-se à vontade para perguntar.'
+		);
+	});
+
+	it('caps accumulated context while retaining the newest fragment', () => {
+		expect(appendTTSLanguageContext('12345', '67890', 8)).toBe('45 67890');
+	});
+});
 
 describe('getSpeechText', () => {
 	it('turns a calendar list into natural speech without changing its facts', () => {

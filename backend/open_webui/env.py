@@ -824,20 +824,8 @@ AWS_REGION = os.getenv('BEDROCK_REGION') or os.getenv('AWS_REGION') or os.getenv
 
 if ENABLE_BEDROCK:
     try:
-        missing_bedrock_env = [
-            name
-            for name, value in (
-                ('AWS_ACCESS_KEY_ID', AWS_CREDENTIALS['aws_access_key_id']),
-                ('AWS_SECRET_ACCESS_KEY', AWS_CREDENTIALS['aws_secret_access_key']),
-                ('AWS_REGION', AWS_REGION),
-            )
-            if not value
-        ]
-        if missing_bedrock_env:
-            raise RuntimeError(
-                'ENABLE_BEDROCK=true requires these environment variables: '
-                + ', '.join(missing_bedrock_env)
-            )
+        if not AWS_REGION:
+            raise RuntimeError('ENABLE_BEDROCK=true requires AWS_REGION')
     except RuntimeError as exc:
         print(f'Bedrock configuration error: {exc}', file=sys.stderr)
         raise SystemExit(1)

@@ -2,7 +2,6 @@
 
 import asyncio
 import base64
-import hashlib
 import html
 import io
 import json
@@ -35,11 +34,14 @@ from pydub.silence import split_on_silence
 from pydub.utils import mediainfo
 
 from open_webui.config import (
+    AUDIO_TTS_DEFAULT_LANGUAGE,
     AUDIO_TTS_ENGINE,
+    AUDIO_TTS_LANGUAGE_VOICES,
     AUDIO_TTS_MODEL,
     AUDIO_TTS_OPENAI_API_BASE_URL,
     AUDIO_TTS_OPENAI_API_KEY,
     AUDIO_TTS_OPENAI_PARAMS,
+    AUDIO_TTS_PRELOAD_VOICES,
     AUDIO_TTS_VOICE,
     CACHE_DIR,
     ELEVENLABS_API_BASE_URL,
@@ -69,6 +71,7 @@ from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.headers import include_user_info_headers
 from open_webui.utils.misc import strict_match_mime_type
 from open_webui.utils.session_pool import get_session
+from open_webui.utils.tts import resolve_tts_voice, tts_cache_key
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -364,14 +367,27 @@ async def _write_tts_cache(
         await f.write(json.dumps(payload))
 
 
-async def _tts_openai(request, payload, file_path, file_body_path, user):
-    """Generate speech via an OpenAI-compatible TTS endpoint."""
+async def _prepare_openai_tts_payload(payload: dict) -> dict:
+    """Apply authoritative OpenAI-compatible TTS settings before caching."""
+    payload = dict(payload)
+    language_context = str(payload.pop('language_context', '') or payload.get('input', ''))
+    explicit_language = payload.pop('language', None)
+    preferred_language = payload.pop('preferred_language', None)
+
     payload['model'] = (
         AUDIO_TTS_MODEL
         if FORCE_AUDIO_TTS_CONFIG
         else await Config.get('audio.tts.model')
     )
-    if not payload.get('voice'):
+    if FORCE_AUDIO_TTS_CONFIG and AUDIO_TTS_LANGUAGE_VOICES:
+        _, payload['voice'] = resolve_tts_voice(
+            text=language_context,
+            voices=AUDIO_TTS_LANGUAGE_VOICES,
+            explicit_language=explicit_language,
+            preferred_language=preferred_language,
+            default_language=AUDIO_TTS_DEFAULT_LANGUAGE,
+        )
+    elif not payload.get('voice'):
         payload['voice'] = (
             AUDIO_TTS_VOICE
             if FORCE_AUDIO_TTS_CONFIG
@@ -382,7 +398,11 @@ async def _tts_openai(request, payload, file_path, file_body_path, user):
         if FORCE_AUDIO_TTS_CONFIG
         else await Config.get('audio.tts.openai.params')
     )
-    payload = {**payload, **(params or {})}
+    return {**payload, **(params or {})}
+
+
+async def _tts_openai(request, payload, file_path, file_body_path, user):
+    """Generate speech via an OpenAI-compatible TTS endpoint."""
     api_key = (
         AUDIO_TTS_OPENAI_API_KEY
         if FORCE_AUDIO_TTS_CONFIG
@@ -426,6 +446,50 @@ async def _tts_openai(request, payload, file_path, file_body_path, user):
     except Exception as exc:
         log.exception(exc)
         await _raise_tts_error(exc, r)
+
+
+async def preload_configured_tts_voices() -> None:
+    """Warm configured voices on an OpenAI-compatible local TTS service."""
+    if not (
+        FORCE_AUDIO_TTS_CONFIG
+        and AUDIO_TTS_ENGINE == 'openai'
+        and AUDIO_TTS_PRELOAD_VOICES
+    ):
+        return
+
+    samples = {'en': 'Ready.', 'es': 'Lista.', 'pt': 'Pronta.'}
+    language_by_voice = {
+        voice: language for language, voice in AUDIO_TTS_LANGUAGE_VOICES.items()
+    }
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {AUDIO_TTS_OPENAI_API_KEY}',
+    }
+    session = await get_session()
+    for voice in dict.fromkeys(AUDIO_TTS_PRELOAD_VOICES):
+        payload = {
+            'model': AUDIO_TTS_MODEL,
+            'voice': voice,
+            'input': samples.get(language_by_voice.get(voice, 'en'), 'Ready.'),
+            **(AUDIO_TTS_OPENAI_PARAMS or {}),
+        }
+        for attempt in range(5):
+            try:
+                response = await session.post(
+                    url=f'{AUDIO_TTS_OPENAI_API_BASE_URL}/audio/speech',
+                    json=payload,
+                    headers=headers,
+                    ssl=AIOHTTP_CLIENT_SESSION_SSL,
+                )
+                response.raise_for_status()
+                await response.read()
+                log.info('Preloaded TTS voice %s', voice)
+                break
+            except Exception as exc:
+                if attempt == 4:
+                    log.warning('Failed to preload TTS voice %s: %s', voice, exc)
+                else:
+                    await asyncio.sleep(min(2**attempt, 10))
 
 
 async def _tts_elevenlabs(request, payload, file_path, file_body_path, user):
@@ -601,15 +665,23 @@ async def speech(request: Request, user=Depends(get_verified_user)):
         )
 
     body = await request.body()
-    name = hashlib.sha256(
-        body
-        + str(engine).encode('utf-8')
-        + str(
-            AUDIO_TTS_MODEL
-            if FORCE_AUDIO_TTS_CONFIG
-            else await Config.get('audio.tts.model')
-        ).encode('utf-8')
-    ).hexdigest()
+    try:
+        payload = json.loads(body)
+    except Exception as exc:
+        log.exception(exc)
+        raise HTTPException(status_code=400, detail='Invalid JSON payload')
+
+    if engine == 'openai':
+        payload = await _prepare_openai_tts_payload(payload)
+    else:
+        # These are Lambda WebUI routing hints, not part of other providers'
+        # public request contracts.
+        for key in ('language', 'preferred_language', 'language_context'):
+            payload.pop(key, None)
+
+    # Hash the effective upstream request. Voice routing and OpenAI-compatible
+    # parameters must be included so multilingual variants never share audio.
+    name = tts_cache_key(str(engine), payload)
 
     file_path = SPEECH_CACHE_DIR.joinpath(f'{name}.mp3')
     file_body_path = SPEECH_CACHE_DIR.joinpath(f'{name}.json')
@@ -624,12 +696,6 @@ async def speech(request: Request, user=Depends(get_verified_user)):
             data={'engine': engine, 'cached': True},
         )
         return FileResponse(file_path)
-
-    try:
-        payload = json.loads(body)
-    except Exception as exc:
-        log.exception(exc)
-        raise HTTPException(status_code=400, detail='Invalid JSON payload')
 
     handler = _TTS_ENGINES.get(engine)
     if handler is None:

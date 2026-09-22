@@ -8,7 +8,12 @@
 	import { generateEmoji } from '$lib/apis';
 	import { synthesizeOpenAISpeech, transcribeAudio } from '$lib/apis/audio';
 	import { getOrInitKokoroWorker, resolveKokoroVoiceId } from '$lib/utils/kokoro';
-	import { isVoiceExitCommand, VOICE_EXIT_ACKNOWLEDGEMENT } from '$lib/utils/tts';
+	import {
+		appendTTSLanguageContext,
+		getPreferredTTSLanguage,
+		isVoiceExitCommand,
+		VOICE_EXIT_ACKNOWLEDGEMENT
+	} from '$lib/utils/tts';
 
 	import { toast } from 'svelte-sonner';
 
@@ -551,7 +556,12 @@
 	// Get voice: model-specific > user settings > config default
 	const getVoiceId = () => {
 		if ($config.features?.force_audio_tts_config) {
-			return $config.features.forced_audio_tts_voice ?? $config.audio.tts.voice;
+			const preferredLanguage = getPreferredTTSLanguage(localStorage.locale);
+			return (
+				$config?.features.forced_audio_tts_language_voices?.[preferredLanguage] ??
+				$config?.features.forced_audio_tts_voice ??
+				''
+			);
 		}
 		if ($config.features?.enable_kokoro_preload) {
 			return $config.features.kokoro_default_voice ?? 'bf_emma';
@@ -733,6 +743,7 @@
 
 	const fetchAudio = async (
 		content: string,
+		languageContext: string,
 		traceId: string,
 		receivedAt: number
 	): Promise<SynthesizedAudio> => {
@@ -768,12 +779,19 @@
 				console.info(`[Voice TTS ${traceId}] synthesis ready (+${elapsed(receivedAt, readyAt)})`);
 				return { audio: url ? new Audio(url) : null, emoji: emojiPromise, readyAt };
 			} else if (getTTSEngine() !== '') {
-				const res = await synthesizeOpenAISpeech(localStorage.token, getVoiceId(), content).catch(
-					(error) => {
-						console.error(error);
-						return null;
+				const res = await synthesizeOpenAISpeech(
+					localStorage.token,
+					getVoiceId(),
+					content,
+					undefined,
+					{
+						preferredLanguage: getPreferredTTSLanguage(localStorage.locale),
+						languageContext
 					}
-				);
+				).catch((error) => {
+					console.error(error);
+					return null;
+				});
 
 				if (!res) return { audio: null, emoji: emojiPromise, readyAt: performance.now() };
 				const blob = await res.blob();
@@ -794,12 +812,15 @@
 	};
 
 	let playbackQueues: Record<string, Promise<boolean>> = {};
+	let languageContexts: Record<string, string> = {};
 
 	const enqueueAudio = (id: string, content: string, signal: AbortSignal): Promise<boolean> => {
 		const receivedAt = performance.now();
 		const traceId = `${id.slice(0, 8)}-${++ttsSequence}`;
 		console.info(`[Voice TTS ${traceId}] sentence received (${content.length} characters)`);
-		const audioPromise = fetchAudio(content, traceId, receivedAt);
+		const languageContext = appendTTSLanguageContext(languageContexts[id] ?? '', content);
+		languageContexts[id] = languageContext;
+		const audioPromise = fetchAudio(content, languageContext, traceId, receivedAt);
 		const previous = playbackQueues[id] ?? Promise.resolve(true);
 		playbackQueues[id] = previous.then(async (shouldContinue) => {
 			if (!shouldContinue || signal.aborted) return false;
@@ -848,6 +869,7 @@
 
 			assistantSpeaking = true;
 			playbackQueues[id] = Promise.resolve(true);
+			languageContexts = { [id]: '' };
 		}
 	};
 
@@ -875,6 +897,7 @@
 		chatStreaming = false;
 		const completed = await (playbackQueues[id] ?? Promise.resolve(true));
 		delete playbackQueues[id];
+		delete languageContexts[id];
 		if (currentMessageId === id && !audioAbortController.signal.aborted) {
 			if (!completed) console.error(`TTS playback failed for message ID ${id}`);
 			if (exitAfterPlayback) {

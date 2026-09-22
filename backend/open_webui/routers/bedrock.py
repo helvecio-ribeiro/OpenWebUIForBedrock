@@ -19,15 +19,22 @@ from open_webui.utils.payload import resolve_system_prompt
 log = logging.getLogger(__name__)
 
 
+def _aws_credentials():
+    return {
+        key: value
+        for key, value in AWS_CREDENTIALS.items()
+        if value
+    }
+
 def _list_foundation_models() -> list[dict]:
-    session = boto3.Session(region_name=AWS_REGION, **AWS_CREDENTIALS)
+    session = boto3.Session(region_name=AWS_REGION, **_aws_credentials())
     client = session.client('bedrock')
     response = client.list_foundation_models()
     return response.get('modelSummaries', [])
 
 
 def _list_inference_profiles() -> list[dict]:
-    session = boto3.Session(region_name=AWS_REGION, **AWS_CREDENTIALS)
+    session = boto3.Session(region_name=AWS_REGION, **_aws_credentials())
     client = session.client('bedrock')
     profiles = []
     next_token = None
@@ -652,7 +659,7 @@ async def generate_chat_completion(request: Request, form_data: dict, user=None)
 
         return StreamingResponse(routed_stream(), media_type='text/event-stream')
 
-    session = boto3.Session(region_name=AWS_REGION, **AWS_CREDENTIALS)
+    session = boto3.Session(region_name=AWS_REGION, **_aws_credentials())
     client = session.client('bedrock-runtime')
 
     if not form_data.get('stream'):
