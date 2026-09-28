@@ -66,10 +66,12 @@ This repository is intentionally independent from old Open WebUI calendar data. 
 
 ## Local Web Research
 
-Local Web Research gives models without native browsing access two read-only tools:
+Local Web Research gives models without native browsing access four research tools:
 
 - `fetch_web_page` retrieves one public HTTP(S) page, extracts its primary readable content, and returns Markdown, plain text, or metadata with source URLs.
 - `crawl_website` applies the same extraction pipeline to a bounded tree of links. It defaults to the starting origin, depth 1, and at most 10 pages; the manifest imposes hard ceilings of depth 2 and 20 pages.
+- `read_web_artifact` reads a bounded character range from one source in a temporary result artifact.
+- `search_web_artifact` performs a bounded, literal, case-insensitive search across an artifact and returns source-attributed excerpts.
 
 The initial implementation deliberately does not execute page JavaScript, provide search-engine results, authenticate to websites, submit forms, or download binary files. Pages that contain only a JavaScript application shell return a warning instead of fabricated content. Optional headless-browser rendering remains future work because it has substantially higher resource and security costs, particularly on Raspberry Pi.
 
@@ -86,7 +88,9 @@ After restarting or refreshing the managed MCP runtime, an administrator can dis
 
 Managed MCP HTTP failures use structured JSON details with an error code, readable message, request ID, retryability flag, and relevant server state. The runtime and Open WebUI backend log the same request ID, making a browser error traceable across both processes. Actor failures are also appended to that service's bounded runtime log. Do not reduce these responses to status text alone when adding clients; display the `detail.message` and request ID to the user.
 
-Operational limits are configured in `web-research-tools/mcp.yaml`. Successful responses use a bounded, short-lived in-memory cache; it contains no authenticated or personalized requests because the service accepts neither credentials nor caller-provided headers. Keep conservative defaults on Raspberry Pi. Increasing response bytes, cache entries, page count, crawl depth, or combined output increases memory consumption and model context use. The service needs outbound DNS and public HTTP(S), but it does not need inbound network exposure or filesystem access.
+Operational limits are configured in `web-research-tools/mcp.yaml`. Successful responses use a bounded, short-lived in-memory cache; it contains no authenticated or personalized requests because the service accepts neither credentials nor caller-provided headers. When cleaned page or crawl content exceeds `MCP_WEB_INLINE_CHARACTERS`, the response contains a bounded preview and an opaque artifact ID. The full cleaned result is stored beneath `web-research-tools/data/artifacts`, never exposed as a host path, and removed after `MCP_WEB_ARTIFACT_TTL_SECONDS` or earlier when count or byte quotas require eviction. Artifact metadata includes source indexes, titles, URLs, excerpts, creation and expiration times, character counts, and truncation state. Range reads, search matches, and search context have independent server-enforced ceilings.
+
+Artifacts contain only already-cleaned public page content and metadata; they never contain request credentials or personalized sessions. The directory is private to the service and is intentionally excluded from Git. It does not need backup because artifacts are temporary and reproducible from their source URLs. The manifest grants the confined service write access only to its package-local `./data` directory; it does not grant root write access or access to unrelated host paths. Keep conservative defaults on Raspberry Pi. Increasing response bytes, cache entries, artifact quotas, page count, crawl depth, or combined output increases disk, memory, and model-context use. The service needs outbound DNS and public HTTP(S), but it does not need inbound network exposure.
 
 Run its focused tests from the repository root with:
 

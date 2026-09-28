@@ -2,7 +2,7 @@ schema_version: 1
 id: local-web-research
 name: Local Web Research
 description: Fetch one public web page or crawl a small, bounded tree of public pages.
-version: 0.1.0
+version: 0.2.0
 
 runtime:
   type: python
@@ -15,8 +15,8 @@ transport:
 
 security:
   profile: confined
-  filesystem_roots: []
-  read_only: true
+  filesystem_roots: [./data]
+  read_only: false
   root_write: false
 
 environment:
@@ -56,6 +56,33 @@ environment:
   MCP_WEB_CACHE_MAX_ENTRIES:
     default: "64"
     description: Maximum successful responses retained in the in-memory cache.
+  MCP_WEB_INLINE_CHARACTERS:
+    default: "12000"
+    description: Maximum cleaned content returned inline before the full result moves to an artifact.
+  MCP_WEB_ARTIFACT_DIR:
+    default: data/artifacts
+    description: Artifact directory; the service requires it to remain beneath this package's data directory.
+  MCP_WEB_ARTIFACT_TTL_SECONDS:
+    default: "3600"
+    description: Artifact lifetime in seconds before automatic cleanup.
+  MCP_WEB_ARTIFACT_MAX_COUNT:
+    default: "64"
+    description: Maximum number of retained artifacts; oldest artifacts are evicted first.
+  MCP_WEB_ARTIFACT_MAX_TOTAL_BYTES:
+    default: "33554432"
+    description: Maximum combined artifact storage in bytes.
+  MCP_WEB_ARTIFACT_MAX_BYTES:
+    default: "2097152"
+    description: Maximum serialized size of one artifact in bytes.
+  MCP_WEB_ARTIFACT_MAX_READ_CHARACTERS:
+    default: "20000"
+    description: Maximum characters returned by one artifact range read.
+  MCP_WEB_ARTIFACT_MAX_SEARCH_MATCHES:
+    default: "20"
+    description: Maximum matches returned by one artifact search.
+  MCP_WEB_ARTIFACT_MAX_SEARCH_CONTEXT_CHARACTERS:
+    default: "500"
+    description: Maximum context characters returned on each side of a search match.
 
 limits:
   startup_timeout_seconds: 30

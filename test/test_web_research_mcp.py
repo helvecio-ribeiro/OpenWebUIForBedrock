@@ -1,4 +1,5 @@
 import importlib.util
+import shutil
 import socket
 import sys
 from pathlib import Path
@@ -38,16 +39,18 @@ def public_resolver(host, port, *, type):
     return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (addresses[host], port))]
 
 
-def test_manifest_registers_as_confined_read_only_service():
+def test_manifest_registers_as_confined_package_local_service():
     manifest = yaml.safe_load((PACKAGE / 'mcp.yaml').read_text(encoding='utf-8'))
 
     assert manifest['schema_version'] == 1
     assert manifest['id'] == 'local-web-research'
     assert manifest['runtime']['args'] == ['run', '--frozen', 'server.py']
     assert manifest['security']['profile'] == 'confined'
-    assert manifest['security']['read_only'] is True
-    assert manifest['security']['filesystem_roots'] == []
+    assert manifest['security']['read_only'] is False
+    assert manifest['security']['root_write'] is False
+    assert manifest['security']['filesystem_roots'] == ['./data']
     assert manifest['environment']['MCP_WEB_MAX_RESPONSE_BYTES']['default'] == '8388608'
+    assert manifest['environment']['MCP_WEB_ARTIFACT_DIR']['default'] == 'data/artifacts'
 
 
 @pytest.mark.parametrize(
@@ -299,15 +302,128 @@ def test_crawl_is_bounded_deduplicated_and_same_origin(web):
     assert all(page['url'] != 'https://example.com/two' for page in result['pages'])
 
 
-def test_server_advertises_only_the_two_initial_tools(monkeypatch):
+def test_artifact_store_reads_searches_and_hides_storage_paths(tmp_path):
+    artifacts = load_module('web_research_artifacts', 'artifact_store.py')
+    store = artifacts.ResearchArtifactStore(
+        tmp_path / 'private-artifacts',
+        max_read_characters=12,
+        max_search_matches=1,
+        max_search_context_characters=8,
+    )
+    metadata = store.create(
+        'crawl',
+        [
+            {
+                'url': 'https://example.com/one',
+                'title': 'One',
+                'content': 'Alpha evidence and more evidence.',
+                'truncated': False,
+            },
+            {
+                'url': 'https://example.com/two',
+                'title': 'Two',
+                'content': 'Second source.',
+                'truncated': True,
+            },
+        ],
+    )
+
+    assert metadata['id'].startswith('wr_')
+    assert metadata['source_count'] == 2
+    assert metadata['sources'][1]['index'] == 1
+    assert metadata['sources'][1]['truncated'] is True
+    assert str(tmp_path) not in str(metadata)
+
+    first = store.read(metadata['id'], source_index=0, max_characters=100)
+    assert first['content'] == 'Alpha eviden'
+    assert first['end'] == 12
+    assert first['has_more'] is True
+    continued = store.read(metadata['id'], source_index=0, offset=first['end'])
+    assert continued['content'].startswith('ce and more')
+
+    matches = store.search(metadata['id'], 'evidence', max_matches=10, context_characters=100)
+    assert matches['returned_matches'] == 1
+    assert matches['total_matches'] == 2
+    assert matches['truncated'] is True
+    assert matches['matches'][0]['source_index'] == 0
+    assert len(matches['matches'][0]['excerpt']) <= len('evidence') + 16
+    assert str(tmp_path) not in str(matches)
+
+
+def test_artifact_store_expires_and_evicts_oldest_entries(tmp_path):
+    artifacts = load_module('web_research_artifact_expiry', 'artifact_store.py')
+    now = [1000.0]
+    store = artifacts.ResearchArtifactStore(
+        tmp_path / 'artifacts',
+        ttl_seconds=10,
+        max_artifacts=1,
+        clock=lambda: now[0],
+    )
+    first = store.create('page', [{'url': 'https://example.com/one', 'content': 'one'}])
+    second = store.create('page', [{'url': 'https://example.com/two', 'content': 'two'}])
+
+    with pytest.raises(artifacts.ArtifactError, match='not found or has expired'):
+        store.read(first['id'])
+    assert store.read(second['id'])['content'] == 'two'
+
+    now[0] = 1011.0
+    assert store.cleanup() == 1
+    with pytest.raises(artifacts.ArtifactError, match='not found or has expired'):
+        store.read(second['id'])
+    with pytest.raises(artifacts.ArtifactError, match='invalid artifact ID'):
+        store.read('../../etc/passwd')
+
+
+def test_server_externalizes_large_results_and_advertises_artifact_tools(monkeypatch):
     monkeypatch.setenv('MCP_WEB_CRAWL_DELAY_SECONDS', '0')
+    artifact_directory = PACKAGE / 'data' / 'pytest-artifacts'
+    shutil.rmtree(artifact_directory, ignore_errors=True)
+    monkeypatch.setenv('MCP_WEB_ARTIFACT_DIR', 'data/pytest-artifacts')
+    monkeypatch.setenv('MCP_WEB_INLINE_CHARACTERS', '40')
     server = load_module('web_research_server_example', 'server.py')
     tools = {tool.name: tool for tool in server.mcp._tool_manager.list_tools()}
 
-    assert set(tools) == {'fetch_web_page', 'crawl_website'}
+    assert set(tools) == {
+        'fetch_web_page',
+        'crawl_website',
+        'read_web_artifact',
+        'search_web_artifact',
+    }
     assert all(tool.description for tool in tools.values())
     assert all(
         schema.get('description')
         for tool in tools.values()
         for schema in tool.parameters.get('properties', {}).values()
     )
+
+    page = {
+        'url': 'https://example.com/article',
+        'title': 'Article',
+        'content': 'important evidence ' * 10,
+        'truncated': False,
+        'source_truncated': False,
+        'warnings': [],
+    }
+    response = server._externalize_page(page)
+    assert response['inline_truncated'] is True
+    assert len(response['content']) <= 40
+    assert response['artifact']['source_count'] == 1
+    artifact_id = response['artifact']['id']
+    assert server.read_web_artifact(artifact_id, max_characters=10)['content'] == 'important '
+    search = server.search_web_artifact(artifact_id, 'evidence')
+    assert search['total_matches'] == 10
+
+    crawl_response = server._externalize_crawl(
+        {
+            'start_url': 'https://example.com/',
+            'pages': [
+                {'url': 'https://example.com/', 'title': 'Home', 'content': 'a' * 30},
+                {'url': 'https://example.com/two', 'title': 'Two', 'content': 'b' * 30},
+            ],
+            'truncated': False,
+        }
+    )
+    assert crawl_response['inline_truncated'] is True
+    assert sum(len(page['content']) for page in crawl_response['pages']) == 40
+    assert crawl_response['artifact']['source_count'] == 2
+    shutil.rmtree(artifact_directory, ignore_errors=True)

@@ -2,7 +2,7 @@
 
 This document is the restart handoff and implementation checklist for adding locally managed MCP servers to Open WebUI. The rationale and settled architecture are recorded separately in [Managed MCP Runtime Design Decisions](managed-mcp-runtime-design.md).
 
-The core runtime, authenticated Open WebUI control plane, local discovery/Add/Remove administration slice, chat-tool integration, Local System Tools example, and standalone Local Calendar example are implemented. The phases below retain the original acceptance criteria and identify hardening or administration work that remains; they should not be read as evidence that the native Calendar or Notes features still exist. Both native implementations have been removed, and Calendar is now provided only by Local Calendar MCP.
+The core runtime, authenticated Open WebUI control plane, local discovery/Add/Remove administration slice, chat-tool integration, Local System Tools example, standalone Local Calendar example, and initial Local Web Research service are implemented. The phases below retain the original acceptance criteria and identify hardening or administration work that remains; they should not be read as evidence that the native Calendar or Notes features still exist. Both native implementations have been removed, and Calendar is now provided only by Local Calendar MCP. A future MCP Builder and validation workbench is tracked as a separate phase; generated candidates must remain isolated from installed services until an administrator explicitly publishes them.
 
 ## Objective
 
@@ -155,7 +155,7 @@ The first discovery slice is implemented: **Local MCP Services -> Discover Servi
 - [ ] Stream status/log updates through existing application events or WebSockets.
 - [ ] Show bounded, redacted stderr logs; do not show raw environment.
 - [ ] Show discovered tools and descriptions after initialization.
-- [ ] Ensure ordinary users see only selectable tools, never management controls.
+- [x] Ensure ordinary users see only selectable tools, never management controls. Management UI placement and every `/api/v1/managed-mcp` operation are administrator-only; the user catalog exposes only authorized, secret-free selections.
 
 Likely frontend files:
 
@@ -201,6 +201,72 @@ Do not begin this phase until local-directory registration is stable.
 - [ ] Add SBOM/digest display and optional signature verification.
 - [ ] Threat-model malicious packages, compromised dependencies, confused-deputy calls, and prompt-injected tool use.
 
+## Phase 7: MCP Builder and validation workbench
+
+Build an administrator-governed authoring workflow that can use a selected model to create or revise local Python MCP packages without granting generated code access to the active runtime. The builder may help write and test a candidate, but it must not install, enable, or publish one. Publishing remains a distinct administrator action implemented through the revision workflow in Phase 5.
+
+Required lifecycle:
+
+`Draft -> Static validation -> Isolated execution -> MCP protocol validation -> Behavioral evaluation -> Administrator review -> Install`
+
+### Candidate workspace and authoring
+
+- [ ] Define a dedicated candidate root outside active package roots, the runtime registry, application data, and production secret locations.
+- [ ] Add a locked `local-mcp-builder` service or equivalent narrowly scoped workbench API for creating, reading, editing, listing, and discarding files only inside one candidate workspace.
+- [ ] Provide maintained templates for a Python `stdio` MCP package, including `mcp.yaml`, `pyproject.toml`, `uv.lock`, server entry point, README, and tests.
+- [ ] Add a requirements interview that captures intended tools, input/output schemas, owned data, external services, network destinations, filesystem needs, secrets, resource limits, and expected failure behavior before generation starts.
+- [ ] Generate tool descriptions and JSON Schemas together with implementation code so the model-facing contract is reviewable independently of the Python source.
+- [ ] Track candidate identity, parent revision, author, timestamps, model/provider used, source changes, declared capabilities, and immutable content digest.
+- [ ] Keep model-generated source, test output, and fetched reference material explicitly untrusted throughout the workflow.
+- [ ] Prevent builder tools from modifying their own implementation, Open WebUI source, installed MCP packages, registry files, service units, or privilege policy.
+
+### Static and dependency validation
+
+- [ ] Parse and validate the manifest before dependency resolution or code execution.
+- [ ] Reject path escapes, symlinks outside the candidate, shell command strings, undeclared executables, unsafe archive entries, and unsupported runtimes or transports.
+- [ ] Require deterministic dependency locks and report lockfile drift, package origin, hashes, licenses, known vulnerabilities, and platform compatibility.
+- [ ] Add linting, formatting checks, type checks, import checks, secret scanning, and prohibited-API checks with machine-readable findings.
+- [ ] Extend the manifest contract with explicit outbound-network and other capability declarations before generated packages can request them.
+- [ ] Produce an SBOM and candidate digest before any behavioral review.
+
+### Isolated execution and protocol validation
+
+- [ ] Select and document the candidate sandbox boundary; prefer an ephemeral rootless container or equivalently isolated systemd unit over execution in the Open WebUI backend or active MCP runtime.
+- [ ] Run candidates without production credentials, user files, application data, runtime tokens, cloud metadata access, or unrestricted network access.
+- [ ] Mount only the candidate and disposable fixtures, use a temporary writable data directory, and destroy the environment after each run.
+- [ ] Enforce CPU, memory, process, file-descriptor, output-size, and wall-clock limits for dependency installation, tests, initialization, and tool calls.
+- [ ] Verify clean MCP `initialize`, `tools/list`, schema serialization, representative `tools/call`, error responses, cancellation, timeout, and shutdown behavior through the official MCP SDK.
+- [ ] Fail validation when protocol output is written incorrectly, child processes survive shutdown, schemas are invalid, output exceeds limits, or observed capabilities exceed the manifest.
+
+### Behavioral and security evaluation
+
+- [ ] Generate unit tests from the approved tool contract while keeping administrator-authored acceptance tests separate from model-generated tests.
+- [ ] Run deterministic happy-path, malformed-input, boundary, timeout, partial-failure, and concurrency cases against disposable fixtures.
+- [ ] Add adversarial checks for filesystem escape, SSRF, credential access, command execution, prompt-injected tool input, oversized results, and persistence outside declared data paths.
+- [ ] Record coverage and clearly distinguish tested behavior from untested claims; a candidate cannot approve itself by generating only passing tests.
+- [ ] Support administrator-maintained policy suites that every candidate must pass regardless of its generated tests.
+- [ ] Make every finding reproducible with the exact digest, fixture version, test command, sanitized logs, and environment description.
+
+### Preview, review, and publishing
+
+- [ ] Add an administrator-only workbench showing source diffs, manifest and schemas, dependency/SBOM data, declared privileges, test results, sanitized logs, and unresolved findings.
+- [ ] Add an optional **Test in Chat** session that exposes only the candidate tools to an isolated evaluation conversation and disposable fixture data; candidates must never appear in ordinary users' tool catalogs.
+- [ ] Label all candidate tool calls and outputs as non-production and retain a bounded evaluation transcript linked to the candidate digest.
+- [ ] Generate a signed or integrity-protected validation report bound to the exact candidate digest; any source, manifest, lockfile, or policy change invalidates prior approval.
+- [ ] Require explicit administrator acknowledgement for network access, host filesystem access, persistent data, secrets, and elevated privilege profiles.
+- [ ] Publish only through Phase 5's side-by-side revision mechanism, rerun initialization and `tools/list`, then atomically activate the approved digest.
+- [ ] Retain the previous known-good revision and expose immediate rollback when post-install health checks fail.
+- [ ] Audit candidate creation, validation, preview, approval, rejection, installation, activation, rollback, and deletion without recording secrets or sensitive fixture contents.
+
+Acceptance criteria:
+
+- A model can create a complete candidate MCP from a maintained template without writing anywhere outside its candidate workspace.
+- Validation runs generated code only inside an ephemeral, resource-limited environment containing no production secrets or user data.
+- The report proves which source digest, dependencies, policies, and tests were evaluated and becomes stale after any candidate change.
+- An administrator can exercise the candidate with disposable data before installation, while ordinary users cannot discover or invoke it.
+- No model-facing tool or builder endpoint can install, activate, grant access to, or elevate a candidate.
+- Publishing creates a reviewable revision, activates only after a final protocol probe succeeds, and preserves a known-good rollback target.
+
 ## Next managed service: Local Web Research
 
 Add `examples/managed-mcp/web-research-tools` as the third locally managed MCP package. Its purpose is to give models without native web access a controlled way to read one public page or traverse a small, bounded set of related pages. Implement both behaviors in one service so URL validation, fetching, extraction, caching, limits, and security policy have a single implementation.
@@ -240,11 +306,11 @@ Add `examples/managed-mcp/web-research-tools` as the third locally managed MCP p
 
 ### Large results and artifacts
 
-- [ ] Return small page and crawl results inline within a strict response budget.
-- [ ] Define an isolated, expiring research-artifact store for results that exceed the inline budget.
-- [ ] Add `read_web_artifact` with bounded ranges and `search_web_artifact` with bounded matches before enabling crawls large enough to require stored artifacts.
-- [ ] Return artifact IDs, source indexes, titles, URLs, excerpts, creation time, expiration time, and truncation state; never expose host filesystem paths.
-- [ ] Add quota and cleanup behavior for cached responses and artifacts.
+- [x] Return small page and crawl results inline within a strict response budget. Per-page and combined-crawl character ceilings are enforced and covered by truncation tests.
+- [x] Define an isolated, expiring research-artifact store for results that exceed the inline budget.
+- [x] Add `read_web_artifact` with bounded ranges and `search_web_artifact` with bounded matches before enabling crawls large enough to require stored artifacts.
+- [x] Return artifact IDs, source indexes, titles, URLs, excerpts, creation time, expiration time, and truncation state; never expose host filesystem paths.
+- [x] Add quota and cleanup behavior for cached responses and artifacts. Response caching remains bounded in memory; artifacts enforce TTL, per-artifact, count, and total-byte ceilings with oldest-first eviction.
 
 ### Optional JavaScript rendering
 
