@@ -3,14 +3,19 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import hmac
+import json
 import logging
+from uuid import uuid4
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from mcp import types
 from mcp.server import Server
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .registry import JSONRegistry, RegistryDocument, RegistryError
 from .schemas import MCPManifest, ManagedServerCreate, ManagedServerUpdate, ServerState
@@ -78,6 +83,95 @@ def create_app(settings: RuntimeSettings) -> FastAPI:
     app = FastAPI(title='Open WebUI Managed MCP Runtime', lifespan=lifespan)
     app.state.registry = registry
     app.state.supervisor = supervisor
+
+    def request_id(request: Request) -> str:
+        return request.headers.get('x-request-id') or uuid4().hex
+
+    def error_detail(
+        *, code: str, message: str, request_id_value: str, retryable: bool = False, **context
+    ) -> dict:
+        return {
+            'code': code,
+            'message': message,
+            'request_id': request_id_value,
+            'retryable': retryable,
+            **{key: value for key, value in context.items() if value is not None},
+        }
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error_handler(request: Request, exc: StarletteHTTPException):
+        trace_id = request_id(request)
+        message = exc.detail if isinstance(exc.detail, str) else 'Request failed'
+        detail = (
+            exc.detail
+            if isinstance(exc.detail, dict) and exc.detail.get('message')
+            else error_detail(
+                code='runtime_http_error',
+                message=message,
+                request_id_value=trace_id,
+                retryable=exc.status_code >= 500,
+            )
+        )
+        detail.setdefault('request_id', trace_id)
+        log_method = log.error if exc.status_code >= 500 else log.warning
+        log_method(
+            'Managed MCP HTTP error status=%s method=%s path=%s request_id=%s code=%s message=%s',
+            exc.status_code,
+            request.method,
+            request.url.path,
+            trace_id,
+            detail.get('code'),
+            detail.get('message'),
+        )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={'detail': detail},
+            headers={'X-Request-Id': trace_id},
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(request: Request, exc: RequestValidationError):
+        trace_id = request_id(request)
+        detail = error_detail(
+            code='invalid_request',
+            message='Managed MCP request validation failed',
+            request_id_value=trace_id,
+            errors=exc.errors(),
+        )
+        log.warning(
+            'Managed MCP validation error method=%s path=%s request_id=%s errors=%s',
+            request.method,
+            request.url.path,
+            trace_id,
+            exc.errors(),
+        )
+        return JSONResponse(
+            status_code=422,
+            content={'detail': detail},
+            headers={'X-Request-Id': trace_id},
+        )
+
+    @app.exception_handler(Exception)
+    async def unexpected_error_handler(request: Request, exc: Exception):
+        trace_id = request_id(request)
+        log.exception(
+            'Managed MCP unhandled error method=%s path=%s request_id=%s',
+            request.method,
+            request.url.path,
+            trace_id,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                'detail': error_detail(
+                    code='runtime_internal_error',
+                    message='Managed MCP runtime encountered an internal error',
+                    request_id_value=trace_id,
+                    retryable=True,
+                )
+            },
+            headers={'X-Request-Id': trace_id},
+        )
 
     async def authenticate(authorization: str | None = Header(default=None)):
         expected = f'Bearer {settings.token}'
@@ -215,15 +309,46 @@ def create_app(settings: RuntimeSettings) -> FastAPI:
 
     class MCPDispatcher:
         async def __call__(self, scope, receive, send):
+            trace_id = dict(scope.get('headers', [])).get(b'x-request-id', b'').decode() or uuid4().hex
+
+            async def send_error(status_code: int, detail: dict):
+                body = json.dumps({'detail': detail}, separators=(',', ':')).encode()
+                await send(
+                    {
+                        'type': 'http.response.start',
+                        'status': status_code,
+                        'headers': [
+                            (b'content-type', b'application/json'),
+                            (b'x-request-id', trace_id.encode()),
+                        ],
+                    }
+                )
+                await send({'type': 'http.response.body', 'body': body})
+
             if scope['type'] != 'http':
-                await send({'type': 'http.response.start', 'status': 404, 'headers': []})
-                await send({'type': 'http.response.body', 'body': b''})
+                detail = error_detail(
+                    code='unsupported_scope',
+                    message='Managed MCP transport supports HTTP requests only',
+                    request_id_value=trace_id,
+                )
+                log.warning('Managed MCP transport rejected non-HTTP scope request_id=%s', trace_id)
+                await send_error(404, detail)
                 return
             headers = {key.lower(): value for key, value in scope.get('headers', [])}
             expected = f'Bearer {settings.token}'.encode()
             if not hmac.compare_digest(headers.get(b'authorization', b''), expected):
-                await send({'type': 'http.response.start', 'status': 401, 'headers': []})
-                await send({'type': 'http.response.body', 'body': b'Unauthorized'})
+                detail = error_detail(
+                    code='invalid_runtime_token',
+                    message='Managed MCP runtime authentication failed',
+                    request_id_value=trace_id,
+                )
+                log.warning(
+                    'Managed MCP authentication failure method=%s path=%s request_id=%s',
+                    scope.get('method'),
+                    scope.get('path'),
+                    trace_id,
+                )
+                await send_error(401, detail)
                 return
             path = scope.get('path', '')
             root_path = scope.get('root_path', '')
@@ -232,8 +357,25 @@ def create_app(settings: RuntimeSettings) -> FastAPI:
             server_id = path.strip('/').split('/', 1)[0]
             actor = supervisor.actors.get(server_id)
             if not actor or actor.state.value != 'ready':
-                await send({'type': 'http.response.start', 'status': 503, 'headers': []})
-                await send({'type': 'http.response.body', 'body': b'MCP server unavailable'})
+                state = actor.state.value if actor else 'missing'
+                reason = actor.last_error if actor else 'server is not registered with the active supervisor'
+                detail = error_detail(
+                    code='mcp_server_unavailable',
+                    message=f"Managed MCP server '{server_id}' is unavailable",
+                    request_id_value=trace_id,
+                    retryable=state in {'starting', 'failed'},
+                    server_id=server_id,
+                    state=state,
+                    reason=reason,
+                )
+                log.warning(
+                    'MCP request rejected server=%s state=%s request_id=%s error=%s',
+                    server_id,
+                    state,
+                    trace_id,
+                    reason,
+                )
+                await send_error(503, detail)
                 return
             token = current_server_id.set(server_id)
             try:

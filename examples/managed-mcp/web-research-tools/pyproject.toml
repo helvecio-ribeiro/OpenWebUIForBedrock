@@ -1,0 +1,8 @@
+[project]
+name = "open-webui-web-research-mcp-example"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["beautifulsoup4==4.14.3", "mcp==1.27.2"]
+
+[dependency-groups]
+dev = ["pytest==8.4.2", "pyyaml==6.0.3"]

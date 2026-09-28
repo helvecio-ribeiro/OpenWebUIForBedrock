@@ -31,6 +31,21 @@ export type ManagedMCPDiscovery = {
 	errors: { package_path: string; error: string }[];
 };
 
+const errorMessage = (detail: unknown, fallback: string) => {
+	if (typeof detail === 'string' && detail) return detail;
+	if (detail && typeof detail === 'object') {
+		const value = detail as { message?: unknown; request_id?: unknown };
+		if (typeof value.message === 'string' && value.message) {
+			return `${value.message}${
+				typeof value.request_id === 'string' && value.request_id
+					? ` (request ${value.request_id})`
+					: ''
+			}`;
+		}
+	}
+	return fallback;
+};
+
 const request = async <T>(token: string, path: string, init: RequestInit = {}): Promise<T> => {
 	const response = await fetch(`${WEBUI_API_BASE_URL}/managed-mcp${path}`, {
 		...init,
@@ -42,7 +57,7 @@ const request = async <T>(token: string, path: string, init: RequestInit = {}): 
 	});
 	if (!response.ok) {
 		const body = await response.json().catch(() => ({}));
-		throw new Error(body?.detail ?? `Managed MCP request failed (${response.status})`);
+		throw new Error(errorMessage(body?.detail, `Managed MCP request failed (${response.status})`));
 	}
 	return response.status === 204 ? (undefined as T) : response.json();
 };

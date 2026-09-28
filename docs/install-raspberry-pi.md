@@ -185,13 +185,14 @@ In `examples/managed-mcp/filesystem-tools/mcp.yaml`, replace both hard-coded
 `/home/helvecio` paths with the narrow directory the MCP may access, such as
 `/home/lambdawebui`. This does not grant sudo access.
 
-Pre-create both MCP package environments:
+Pre-create all MCP package environments:
 
 ```bash
 sudo -u lambdawebui -H bash -lc '
   export PATH="$HOME/.local/bin:$PATH"
   cd /opt/lambda-webui/examples/managed-mcp/filesystem-tools && uv sync --frozen
   cd /opt/lambda-webui/examples/managed-mcp/calendar-tools && uv sync --frozen
+  cd /opt/lambda-webui/examples/managed-mcp/web-research-tools && uv sync --frozen
 '
 ```
 
@@ -258,7 +259,12 @@ curl --fail http://127.0.0.1:8080/health
 
 Open `http://<pi-address>:8080`, create the first administrator, discover the
 services under **Admin Panel → Settings → Integrations**, and enable them per
-user under **User Settings → Tools**.
+user under **User Settings → Tools**. Local Web Research is intended for models
+without native browsing, such as Kimi. Leave it disabled for Claude, OpenAI, or
+other models whose provider already supplies web access unless a user explicitly
+wants the locally controlled reader. Its default 8 MiB response ceiling supports
+large news homepages but increases peak memory use; keep crawl depth and page
+count conservative on smaller Pi models.
 
 ## 7. HTTPS and Voice Mode
 
@@ -326,6 +332,9 @@ ss -lntp | grep -E ':(8080|9090|8091|8880|11434)\b'
 - A blank UI after an update usually means the frontend was not rebuilt.
 - If an MCP is installed but invisible to a model, verify that the user enabled
   it under **User Settings → Tools**.
+- Managed MCP errors displayed in the UI include a request ID. Search that ID
+  in both service journals to correlate backend and runtime failures. The error
+  also reports the managed child state when it is unavailable.
 - Missing `ffprobe` causes audio-format detection failures before Whisper runs.
 
 ## Platform references

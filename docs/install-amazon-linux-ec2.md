@@ -303,6 +303,7 @@ sudo -u lambdawebui -H bash -lc '
   export PATH="$HOME/.local/bin:$PATH"
   cd /opt/lambda-webui/examples/managed-mcp/filesystem-tools && uv sync --frozen
   cd /opt/lambda-webui/examples/managed-mcp/calendar-tools && uv sync --frozen
+  cd /opt/lambda-webui/examples/managed-mcp/web-research-tools && uv sync --frozen
 '
 ```
 
@@ -384,9 +385,13 @@ make sure the two secure-cookie flags are true and restart Lambda WebUI.
 2. After that account exists, verify signup and the default `pending` role under
    **Admin Panel → Settings → General**. These values are persisted in the DB.
 3. Open **Admin Panel → Settings → Integrations**, select **Discover Services**,
-   and add Local Calendar and Local System Tools.
+   and add Local Calendar, Local System Tools, and Local Web Research.
 4. Each user enables the desired services under **User Settings → Tools**.
-5. Test “What is today's date?” and “List all appointments.”
+   Prefer attaching Local Web Research to models without native browsing, such
+   as Kimi, rather than enabling it universally for Claude or OpenAI models that
+   already have provider-native web access.
+5. Test “What is today's date?”, “List all appointments”, and ask the non-native
+   browsing model to summarize `https://example.com`.
 
 ## 8. Upgrades and backups
 
@@ -417,6 +422,13 @@ df -i / /opt /tmp
   using HTTP or has an untrusted certificate.
 - MCP services shown as installed but absent from model requests must also be
   enabled by that user under **User Settings → Tools**.
+- Managed MCP errors displayed in the UI include a request ID. Search that ID
+  in both `lambda-webui` and `lambda-webui-mcp` journals to correlate the
+  backend and runtime failure. A `mcp_server_unavailable` response also reports
+  whether the child is starting, stopped, failed, or missing.
+- Large news homepages may require the Local Web Research default 8 MiB raw
+  response ceiling. `max_characters` limits cleaned model output and does not
+  limit the original HTML download.
 - Missing `ffprobe` can cause otherwise valid WAV uploads to fail before Whisper.
 - A failure downloading `nvidia-cusparse`, `triton`, or another GPU-oriented
   wheel on a CPU instance means the requirements transaction did not constrain

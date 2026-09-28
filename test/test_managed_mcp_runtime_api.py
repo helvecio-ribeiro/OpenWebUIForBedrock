@@ -63,7 +63,11 @@ async def test_management_api_requires_runtime_token(settings):
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url='http://runtime') as client:
         assert (await client.get('/healthz')).status_code == 200
-        assert (await client.get('/api/servers')).status_code == 401
+        unauthorized = await client.get('/api/servers')
+        assert unauthorized.status_code == 401
+        assert unauthorized.json()['detail']['code'] == 'runtime_http_error'
+        assert unauthorized.json()['detail']['message'] == 'invalid runtime token'
+        assert unauthorized.json()['detail']['request_id'] == unauthorized.headers['x-request-id']
         response = await client.get('/api/servers', headers={'Authorization': 'Bearer test-token'})
         assert response.status_code == 200
         assert response.json() == []
@@ -147,5 +151,40 @@ async def test_mcp_endpoint_rejects_bad_token_and_unknown_server(settings):
     async with httpx.AsyncClient(transport=transport, base_url='http://runtime') as client:
         bad = await client.post('/mcp/demo', headers={'Authorization': 'Bearer wrong'})
         assert bad.status_code == 401
+        assert bad.json()['detail']['code'] == 'invalid_runtime_token'
+        assert bad.json()['detail']['request_id'] == bad.headers['x-request-id']
         missing = await client.post('/mcp/missing', headers={'Authorization': 'Bearer test-token'})
         assert missing.status_code == 503
+        detail = missing.json()['detail']
+        assert detail['code'] == 'mcp_server_unavailable'
+        assert detail['server_id'] == 'missing'
+        assert detail['state'] == 'missing'
+        assert detail['reason'] == 'server is not registered with the active supervisor'
+        assert detail['request_id'] == missing.headers['x-request-id']
+
+
+async def test_mcp_endpoint_reports_failed_actor_state_and_correlation_id(settings):
+    app = create_app(settings)
+    actor = FakeActor()
+    actor.state = ServerState.failed
+    actor.last_error = 'child exited with status 1'
+    app.state.supervisor.actors['demo'] = actor
+    transport = httpx.ASGITransport(app=app)
+
+    async with httpx.AsyncClient(transport=transport, base_url='http://runtime') as client:
+        response = await client.post(
+            '/mcp/demo',
+            headers={'Authorization': 'Bearer test-token', 'X-Request-Id': 'trace-123'},
+        )
+
+    assert response.status_code == 503
+    assert response.headers['x-request-id'] == 'trace-123'
+    assert response.json()['detail'] == {
+        'code': 'mcp_server_unavailable',
+        'message': "Managed MCP server 'demo' is unavailable",
+        'request_id': 'trace-123',
+        'retryable': True,
+        'server_id': 'demo',
+        'state': 'failed',
+        'reason': 'child exited with status 1',
+    }

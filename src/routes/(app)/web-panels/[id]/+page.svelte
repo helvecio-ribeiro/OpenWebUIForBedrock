@@ -19,7 +19,10 @@
 	import Markdown from '$lib/components/chat/Messages/Markdown.svelte';
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import { copyToClipboard } from '$lib/utils';
-	import { normalizeChallengeResult } from '$lib/utils/webPanelActions';
+	import {
+		normalizeChallengeResult,
+		withWebPanelTemporalContext
+	} from '$lib/utils/webPanelActions';
 
 	let panel: WebPanel | null = null;
 	let address = '';
@@ -248,7 +251,10 @@
 			stream: false,
 			mcp_server_ids: mcpServerIds.length > 0 ? mcpServerIds : undefined,
 			messages: [
-				{ role: 'system', content: instruction[action] ?? instruction.explain },
+				{
+					role: 'system',
+					content: withWebPanelTemporalContext(instruction[action] ?? instruction.explain)
+				},
 				{
 					role: 'user',
 					content: `Page title: ${selectionPageTitle || panel?.title || ''}\nPage URL: ${selectionPageUrl || panel?.url || ''}\n\n${action === 'summarize-page' ? 'Cleaned article content' : 'Selected passage'}:\n${text}${action === 'challenge' && context ? `\n\nSurrounding context:\n${context}` : ''}`

@@ -18,6 +18,36 @@ from open_webui.env import (
 )
 
 
+def describe_mcp_transport_error(exc: BaseException) -> str:
+    """Extract a structured runtime message from nested HTTP transport failures."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        try:
+            detail = exc.response.json().get('detail')
+        except Exception:
+            detail = None
+        if isinstance(detail, dict):
+            message = detail.get('message') or str(exc)
+            request_id = detail.get('request_id') or exc.response.headers.get('x-request-id')
+            reason = detail.get('reason')
+            context = []
+            if detail.get('server_id'):
+                context.append(f"server={detail['server_id']}")
+            if detail.get('state'):
+                context.append(f"state={detail['state']}")
+            if reason:
+                context.append(f'reason={reason}')
+            if request_id:
+                context.append(f'request_id={request_id}')
+            return f"{message} ({', '.join(context)})" if context else str(message)
+        if isinstance(detail, str) and detail:
+            return detail
+    nested = getattr(exc, 'exceptions', None)
+    if nested:
+        descriptions = [describe_mcp_transport_error(item) for item in nested]
+        return '; '.join(item for item in descriptions if item)
+    return str(exc) or type(exc).__name__
+
+
 def _build_httpx_client(headers=None, timeout=None, auth=None, verify=True):
     """Create an httpx AsyncClient for MCP transport.
 
@@ -83,7 +113,7 @@ class MCPClient:
                 self.exit_stack = exit_stack.pop_all()
             except Exception as e:
                 await self.disconnect()
-                raise e
+                raise RuntimeError(describe_mcp_transport_error(e)) from e
 
     async def list_tool_specs(self) -> Optional[dict]:
         if not self.session:

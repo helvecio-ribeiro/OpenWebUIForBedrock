@@ -4,7 +4,7 @@ import logging
 import time
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -109,7 +109,13 @@ async def get_mcp_servers(
         try:
             managed = await managed_mcp_runtime.list_servers()
         except ManagedMCPRuntimeError as exc:
-            log.warning('Managed MCP runtime unavailable while building catalog: %s', exc)
+            log.error(
+                'Managed MCP catalog failed code=%s request_id=%s error=%s',
+                exc.code,
+                exc.request_id,
+                exc,
+            )
+            raise HTTPException(status_code=503, detail=exc.detail()) from exc
 
     catalog = build_mcp_server_catalog(configured, managed)
     group_ids: set[str] = set()

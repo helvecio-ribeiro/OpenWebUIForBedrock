@@ -6,7 +6,13 @@ import pytest
 
 from open_webui.mcp_runtime.registry import package_digest
 from open_webui.mcp_runtime.schemas import MCPManifest, ManagedServer
-from open_webui.mcp_runtime.supervisor import BoundedLog, ServerActor, Supervisor, SupervisorError
+from open_webui.mcp_runtime.supervisor import (
+    BoundedLog,
+    ServerActor,
+    Supervisor,
+    SupervisorError,
+    describe_exception,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -132,6 +138,19 @@ def test_bounded_log_redacts_configured_secrets():
     log.close()
 
 
+def test_describe_exception_includes_nested_task_group_causes():
+    error = ExceptionGroup(
+        'session failed',
+        [RuntimeError('child process closed stdout'), ValueError('invalid protocol response')],
+    )
+
+    description = describe_exception(error)
+
+    assert 'session failed' in description
+    assert 'child process closed stdout' in description
+    assert 'invalid protocol response' in description
+
+
 async def test_actor_queue_serializes_requests(tmp_path):
     server = server_record(tmp_path)
     actor = ServerActor(server, {})
@@ -168,3 +187,8 @@ async def test_actor_restarts_with_bounded_attempts(tmp_path, monkeypatch):
     assert calls == 3
     assert actor.state.value == 'failed'
     assert actor.last_error == 'boom'
+    assert actor.logs.lines() == [
+        'Managed runtime failure: boom',
+        'Managed runtime failure: boom',
+        'Managed runtime failure: boom',
+    ]

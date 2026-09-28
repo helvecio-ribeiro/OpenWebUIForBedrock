@@ -21,6 +21,15 @@ class SupervisorError(RuntimeError):
     pass
 
 
+def describe_exception(exc: BaseException) -> str:
+    """Flatten exception groups so runtime status exposes their useful causes."""
+    nested = getattr(exc, 'exceptions', None)
+    if nested:
+        details = '; '.join(describe_exception(item) for item in nested)
+        return f'{exc}: {details}' if str(exc) else details
+    return str(exc) or type(exc).__name__
+
+
 @dataclass
 class ActorRequest:
     operation: str
@@ -162,7 +171,8 @@ class ServerActor:
             except asyncio.CancelledError:
                 raise
             except BaseException as exc:
-                self.last_error = str(exc)
+                self.last_error = describe_exception(exc)
+                self.logs.write(f'Managed runtime failure: {self.last_error}\n')
                 self.state = ServerState.failed
                 self._fail_pending(exc)
                 limits = self.server.manifest.limits
@@ -204,6 +214,7 @@ class ServerActor:
                         }
                         for tool in listed.tools
                     ]
+                    self.last_error = None
                     self.state = ServerState.ready
                     self._ready.set()
                     while True:

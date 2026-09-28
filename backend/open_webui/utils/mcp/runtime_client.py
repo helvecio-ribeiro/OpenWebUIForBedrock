@@ -8,7 +8,31 @@ import httpx
 
 
 class ManagedMCPRuntimeError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        code: str = 'managed_mcp_runtime_error',
+        request_id: str | None = None,
+        retryable: bool = False,
+        context: dict | None = None,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+        self.request_id = request_id
+        self.retryable = retryable
+        self.context = context or {}
+
+    def detail(self) -> dict:
+        return {
+            'code': self.code,
+            'message': str(self),
+            'request_id': self.request_id,
+            'retryable': self.retryable,
+            **self.context,
+        }
 
 
 class ManagedMCPRuntimeClient:
@@ -39,13 +63,38 @@ class ManagedMCPRuntimeClient:
             async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
                 response = await client.request(method, f'{self.base_url}{path}', headers=headers, json=json)
         except httpx.HTTPError as exc:
-            raise ManagedMCPRuntimeError(f'managed MCP runtime unavailable: {exc}') from exc
+            raise ManagedMCPRuntimeError(
+                f'managed MCP runtime unavailable: {exc}',
+                code='runtime_connection_failed',
+                retryable=True,
+            ) from exc
         if response.status_code >= 400:
             try:
                 detail = response.json().get('detail', response.text)
             except Exception:
                 detail = response.text
-            raise ManagedMCPRuntimeError(str(detail))
+            if isinstance(detail, dict):
+                message = detail.get('message') or f'managed MCP runtime returned HTTP {response.status_code}'
+                context = {
+                    key: value
+                    for key, value in detail.items()
+                    if key not in {'message', 'code', 'request_id', 'retryable'}
+                }
+                raise ManagedMCPRuntimeError(
+                    str(message),
+                    status_code=response.status_code,
+                    code=detail.get('code', 'runtime_http_error'),
+                    request_id=detail.get('request_id') or response.headers.get('x-request-id'),
+                    retryable=bool(detail.get('retryable', response.status_code >= 500)),
+                    context=context,
+                )
+            raise ManagedMCPRuntimeError(
+                str(detail) or f'managed MCP runtime returned HTTP {response.status_code}',
+                status_code=response.status_code,
+                code='runtime_http_error',
+                request_id=response.headers.get('x-request-id'),
+                retryable=response.status_code >= 500,
+            )
         if response.status_code == 204:
             return None
         return response.json()

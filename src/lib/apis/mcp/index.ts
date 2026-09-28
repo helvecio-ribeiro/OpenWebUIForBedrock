@@ -19,6 +19,21 @@ const authenticatedGet = (url: string, token: string) =>
 		headers: { Accept: 'application/json', authorization: `Bearer ${token}` }
 	});
 
+const errorMessage = (detail: unknown, fallback: string) => {
+	if (typeof detail === 'string' && detail) return detail;
+	if (detail && typeof detail === 'object') {
+		const value = detail as { message?: unknown; request_id?: unknown };
+		if (typeof value.message === 'string' && value.message) {
+			return `${value.message}${
+				typeof value.request_id === 'string' && value.request_id
+					? ` (request ${value.request_id})`
+					: ''
+			}`;
+		}
+	}
+	return fallback;
+};
+
 export const getMCPServers = async (token = ''): Promise<MCPServerCatalogEntry[]> => {
 	const response = await authenticatedGet(`${WEBUI_API_BASE_URL}/mcp/servers`, token);
 	const contentType = response.headers.get('content-type') ?? '';
@@ -41,7 +56,9 @@ export const getMCPServers = async (token = ''): Promise<MCPServerCatalogEntry[]
 
 	const payload = await response.json();
 	if (!response.ok) {
-		throw new Error(payload.detail ?? `Unable to load MCP servers (${response.status})`);
+		throw new Error(
+			errorMessage(payload.detail, `Unable to load MCP servers (${response.status})`)
+		);
 	}
 	if (!Array.isArray(payload)) {
 		throw new Error('MCP catalog returned an invalid response');

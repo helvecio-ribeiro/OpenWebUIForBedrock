@@ -201,6 +201,80 @@ Do not begin this phase until local-directory registration is stable.
 - [ ] Add SBOM/digest display and optional signature verification.
 - [ ] Threat-model malicious packages, compromised dependencies, confused-deputy calls, and prompt-injected tool use.
 
+## Next managed service: Local Web Research
+
+Add `examples/managed-mcp/web-research-tools` as the third locally managed MCP package. Its purpose is to give models without native web access a controlled way to read one public page or traverse a small, bounded set of related pages. Implement both behaviors in one service so URL validation, fetching, extraction, caching, limits, and security policy have a single implementation.
+
+### Service contract
+
+- [x] Add a schema-version-1 `mcp.yaml` with stable ID `local-web-research`, confined privileges, and conservative time and memory limits. Schema version 1 has no network-capability field; the service enforces its outbound policy internally.
+- [x] Add a locked Python package using the same `uv run --frozen server.py` and MCP `stdio` conventions as the existing examples.
+- [x] Expose `fetch_web_page` for a single URL. Inputs include `url`, output format, maximum returned characters, and an optional content selector.
+- [x] Return the final URL, title, description, detected publication/modification dates, cleaned main content, discovered links, content type, and any truncation or extraction warnings.
+- [x] Expose `crawl_website` by reusing the single-page pipeline. Inputs include `start_url`, `max_depth`, `max_pages`, same-origin policy, include/exclude patterns, and output format.
+- [x] Default crawls to the starting origin, depth `1`, a small page limit, and server-enforced hard ceilings regardless of model input.
+- [x] Return a crawl manifest containing visited, rejected, and failed URLs plus page content, titles, link relationships, and truncation state. Redirect destinations are recorded as each page's final URL.
+- [x] Keep search-engine integration outside the initial release. A future `search_web` tool must use an explicitly configured provider and feed selected results through `fetch_web_page`.
+
+### Fetching and extraction pipeline
+
+- [x] Permit only `http` and `https` URLs and validate the destination before every request and redirect.
+- [x] Fetch with an identifiable user agent, bounded redirects, request timeouts, response-size limits, and identity encoding. Unexpected compression is rejected.
+- [x] Accept only supported textual content types in the first release. Report unsupported documents instead of returning binary data.
+- [x] Decode HTML safely, remove scripts, styles, navigation, and common page chrome, then extract the primary readable content.
+- [x] Normalize extracted content to Markdown by default, with plain text and metadata-only output options.
+- [x] Preserve source URLs and relevant link targets so model answers can identify their evidence.
+- [x] Treat all fetched text as untrusted source material and clearly delimit it from MCP/tool instructions in tool descriptions and results.
+- [x] Add a bounded short-lived in-memory cache keyed by normalized URL. The service accepts no authentication headers, cookies, or personalized sessions.
+
+### Network and execution security
+
+- [x] Block loopback, private, link-local, multicast, unspecified, reserved, and cloud-instance metadata destinations, including IPv4 and IPv6 representations.
+- [x] Resolve and validate every hostname immediately before connecting, validate every resolved address, repeat validation after redirects, and pin the connection to the validated address to mitigate SSRF and DNS rebinding.
+- [x] Do not accept caller-provided headers, credentials, cookies, proxy settings, request bodies, or non-GET methods in the initial release.
+- [x] Do not submit forms, download files, authenticate to sites, or mutate remote state.
+- [ ] Add configurable domain allow/deny policies, per-domain rate limits, global concurrency limits, and crawl-delay behavior.
+- [x] Define and document the service policy for `robots.txt`; crawling respects it by default and bypass requires explicit administrator configuration.
+- [x] Bound page bytes, extracted characters, crawl depth, total pages, combined characters, request time, and redirects. Links-per-page and total execution-time ceilings remain hardening work.
+- [x] Keep page bodies and response credentials out of application logs. Query-string redaction remains hardening work before adding request logging.
+
+### Large results and artifacts
+
+- [ ] Return small page and crawl results inline within a strict response budget.
+- [ ] Define an isolated, expiring research-artifact store for results that exceed the inline budget.
+- [ ] Add `read_web_artifact` with bounded ranges and `search_web_artifact` with bounded matches before enabling crawls large enough to require stored artifacts.
+- [ ] Return artifact IDs, source indexes, titles, URLs, excerpts, creation time, expiration time, and truncation state; never expose host filesystem paths.
+- [ ] Add quota and cleanup behavior for cached responses and artifacts.
+
+### Optional JavaScript rendering
+
+- [x] Do not require Chromium for the initial HTTP-fetch release.
+- [x] Detect likely application-shell responses and return a warning when meaningful content could not be extracted.
+- [ ] After the HTTP implementation is stable, add an optional `render_web_page` capability backed by an isolated headless browser.
+- [ ] Make browser availability discoverable in tool metadata and keep HTTP fetching as the default path.
+- [ ] Execute page JavaScript only in a sandboxed process with strict CPU, memory, navigation, download, popup, request, and wall-clock limits.
+- [ ] Apply the same destination validation to every browser subresource and navigation; block access to local services, private networks, metadata endpoints, downloads, permissions, and persistent browser storage.
+- [ ] Capture the rendered DOM and pass it through the same main-content extraction and normalization pipeline rather than returning an uncontrolled raw page.
+
+### Tests and acceptance criteria
+
+- [x] Add unit tests for URL normalization, redirect validation, IP classification, DNS results, content-type handling, extraction, Markdown conversion, output ceilings, and truncation metadata. Socket-level byte-limit tests remain.
+- [x] Add SSRF regression tests for local/private/metadata addresses, IPv4-mapped IPv6, localhost aliases, mixed-answer rebinding simulations, and redirect pivots. Additional exotic textual IP forms remain hardening work.
+- [x] Add crawler tests for cycles, duplicate/canonical URLs, fragments, cross-origin links, and depth ceilings. Include/exclude, cancellation, rate limiting, and partial-failure cases remain.
+- [ ] Use a controlled local HTTP fixture for deterministic integration tests; tests must not depend on public websites.
+- [ ] Verify calls through an MCP SDK `ClientSession` over managed stdio. Initialize and `tools/list` have direct stdio smoke coverage.
+- [ ] Verify the package can be discovered, registered, enabled per user, invoked from chat, stopped, and recovered after runtime restart.
+- [ ] Verify a model can fetch one page without receiving crawler complexity, and can request a bounded crawl without receiving unbounded content in its context.
+- [x] Document installation, configuration, resource requirements, network policy, operational limits, and Raspberry Pi considerations in `examples/managed-mcp/README.md`.
+
+Initial release acceptance criteria:
+
+- `fetch_web_page` reliably returns clean, source-attributed Markdown from supported public HTML pages without executing JavaScript.
+- `crawl_website` traverses only URLs permitted by its origin and policy constraints and cannot exceed server-enforced budgets.
+- Requests cannot reach the host, private networks, local MCP/runtime ports, or cloud metadata services.
+- Oversized and unsupported responses fail predictably without exhausting service or model context resources.
+- Chromium and search-provider credentials are not required for the initial release.
+
 ## Test matrix
 
 - [x] Manifest parsing and forward-incompatible schema rejection.

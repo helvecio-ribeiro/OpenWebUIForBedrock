@@ -1,0 +1,64 @@
+schema_version: 1
+id: local-web-research
+name: Local Web Research
+description: Fetch one public web page or crawl a small, bounded tree of public pages.
+version: 0.1.0
+
+runtime:
+  type: python
+  command: uv
+  args: [run, --frozen, server.py]
+  working_directory: .
+
+transport:
+  type: stdio
+
+security:
+  profile: confined
+  filesystem_roots: []
+  read_only: true
+  root_write: false
+
+environment:
+  MCP_WEB_USER_AGENT:
+    default: LambdaWebUI-WebResearch/0.1
+    description: User-Agent sent with public web requests.
+  MCP_WEB_MAX_RESPONSE_BYTES:
+    default: "8388608"
+    description: Maximum bytes read from one response; larger textual pages are partially extracted.
+  MCP_WEB_MAX_OUTPUT_CHARACTERS:
+    default: "50000"
+    description: Maximum cleaned characters returned for one page.
+  MCP_WEB_MAX_CRAWL_PAGES:
+    default: "20"
+    description: Hard ceiling for pages visited by one crawl.
+  MCP_WEB_MAX_CRAWL_DEPTH:
+    default: "2"
+    description: Hard ceiling for link depth in one crawl.
+  MCP_WEB_MAX_CRAWL_CHARACTERS:
+    default: "120000"
+    description: Hard ceiling for combined page content returned by one crawl.
+  MCP_WEB_TIMEOUT_SECONDS:
+    default: "15"
+    description: Network timeout for one request.
+  MCP_WEB_MAX_REDIRECTS:
+    default: "5"
+    description: Maximum redirects followed by one page request.
+  MCP_WEB_ROBOTS_POLICY:
+    default: respect
+    description: Crawl policy; respect checks robots.txt and ignore bypasses it explicitly.
+  MCP_WEB_CRAWL_DELAY_SECONDS:
+    default: "0.25"
+    description: Minimum delay between crawl requests to the same origin.
+  MCP_WEB_CACHE_TTL_SECONDS:
+    default: "300"
+    description: Lifetime of a successful in-memory response cache entry; zero disables caching.
+  MCP_WEB_CACHE_MAX_ENTRIES:
+    default: "64"
+    description: Maximum successful responses retained in the in-memory cache.
+
+limits:
+  startup_timeout_seconds: 30
+  call_timeout_seconds: 120
+  memory_mb: 384
+  restart: on-failure

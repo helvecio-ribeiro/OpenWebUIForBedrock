@@ -62,6 +62,41 @@ async def test_runtime_client_surfaces_runtime_errors(monkeypatch):
         await client.create_server({}, 'admin')
 
 
+async def test_runtime_client_preserves_structured_error_context(monkeypatch):
+    monkeypatch.setattr(httpx, 'AsyncClient', FakeAsyncClient)
+    FakeAsyncClient.response = httpx.Response(
+        503,
+        json={
+            'detail': {
+                'code': 'mcp_server_unavailable',
+                'message': "Managed MCP server 'web' is unavailable",
+                'request_id': 'trace-123',
+                'retryable': True,
+                'server_id': 'web',
+                'state': 'failed',
+                'reason': 'child exited',
+            }
+        },
+        request=httpx.Request('GET', 'http://runtime'),
+    )
+    client = ManagedMCPRuntimeClient('http://runtime', 'secret')
+
+    with pytest.raises(ManagedMCPRuntimeError) as caught:
+        await client.get_server('web')
+
+    error = caught.value
+    assert error.status_code == 503
+    assert error.code == 'mcp_server_unavailable'
+    assert error.request_id == 'trace-123'
+    assert error.retryable is True
+    assert error.context == {
+        'server_id': 'web',
+        'state': 'failed',
+        'reason': 'child exited',
+    }
+    assert error.detail()['message'] == "Managed MCP server 'web' is unavailable"
+
+
 def test_runtime_connection_uses_existing_mcp_shape():
     client = ManagedMCPRuntimeClient('http://runtime', 'secret')
     connection = client.connection(
@@ -103,3 +138,32 @@ def test_runtime_token_file_is_supported(tmp_path, monkeypatch):
     monkeypatch.setenv('MANAGED_MCP_RUNTIME_TOKEN_FILE', str(token_file))
     client = ManagedMCPRuntimeClient('http://runtime')
     assert client.token == 'file-secret'
+
+
+def test_mcp_transport_error_surfaces_structured_runtime_context(monkeypatch):
+    monkeypatch.setenv('WEBUI_SECRET_KEY', 'test-secret')
+    from open_webui.utils.mcp.client import describe_mcp_transport_error
+
+    request = httpx.Request('POST', 'http://runtime/mcp/web')
+    response = httpx.Response(
+        503,
+        json={
+            'detail': {
+                'code': 'mcp_server_unavailable',
+                'message': "Managed MCP server 'web' is unavailable",
+                'request_id': 'trace-123',
+                'server_id': 'web',
+                'state': 'failed',
+                'reason': 'child exited',
+            }
+        },
+        request=request,
+    )
+    status_error = httpx.HTTPStatusError('unavailable', request=request, response=response)
+
+    message = describe_mcp_transport_error(ExceptionGroup('transport failed', [status_error]))
+
+    assert message == (
+        "Managed MCP server 'web' is unavailable "
+        '(server=web, state=failed, reason=child exited, request_id=trace-123)'
+    )

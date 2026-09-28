@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from open_webui.events import EVENTS, publish_event
@@ -10,6 +12,7 @@ from open_webui.utils.auth import get_admin_user
 from open_webui.utils.mcp.runtime_client import ManagedMCPRuntimeError, managed_mcp_runtime
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 async def require_runtime():
@@ -28,9 +31,17 @@ async def validate_access_grants(data: dict) -> None:
 
 
 def runtime_error(exc: ManagedMCPRuntimeError):
-    message = str(exc)
-    code = 404 if 'not found' in message else 502
-    raise HTTPException(status_code=code, detail=message) from exc
+    code = exc.status_code if exc.status_code and 400 <= exc.status_code < 600 else 502
+    log_method = log.error if code >= 500 else log.warning
+    log_method(
+        'Managed MCP API error status=%s code=%s request_id=%s retryable=%s message=%s',
+        code,
+        exc.code,
+        exc.request_id,
+        exc.retryable,
+        exc,
+    )
+    raise HTTPException(status_code=code, detail=exc.detail()) from exc
 
 
 @router.get('/', dependencies=[Depends(require_runtime)])

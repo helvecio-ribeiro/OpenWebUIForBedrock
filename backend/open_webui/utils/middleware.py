@@ -2241,7 +2241,13 @@ async def connect_mcp_server(
                     mcp_server_connection = server_connection
                     break
         except ManagedMCPRuntimeError as exc:
-            log.warning('Managed MCP runtime unavailable: %s', exc)
+            log.error(
+                'Managed MCP runtime unavailable code=%s request_id=%s error=%s',
+                exc.code,
+                exc.request_id,
+                exc,
+            )
+            raise HTTPException(status_code=503, detail=exc.detail()) from exc
 
     if not mcp_server_connection:
         log.error(f'MCP server with id {server_id} not found')

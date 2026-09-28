@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
-import { normalizeChallengeResult } from './webPanelActions';
+import { normalizeChallengeResult, withWebPanelTemporalContext } from './webPanelActions';
+
+describe('withWebPanelTemporalContext', () => {
+	it('adds a deterministic current-date reference to every action instruction', () => {
+		const result = withWebPanelTemporalContext(
+			'Fact-check the selected text.',
+			new Date('2026-09-22T22:30:45.000Z'),
+			'America/Mexico_City'
+		);
+
+		expect(result).toContain('Current date: 2026-09-22');
+		expect(result).toContain('Current local datetime: 2026-09-22 16:30:45');
+		expect(result).toContain('User timezone: America/Mexico_City');
+		expect(result).toContain('Current UTC datetime: 2026-09-22T22:30:45.000Z');
+		expect(result).toContain('Do not substitute a model training cutoff');
+		expect(result).toMatch(/Fact-check the selected text\.$/);
+	});
+});
 
 describe('normalizeChallengeResult', () => {
 	it('bolds and canonicalizes every challenge section title', () => {
