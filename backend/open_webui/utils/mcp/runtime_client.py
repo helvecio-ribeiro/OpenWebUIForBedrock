@@ -53,14 +53,25 @@ class ManagedMCPRuntimeClient:
     def enabled(self) -> bool:
         return bool(self.base_url and self.token)
 
-    async def request(self, method: str, path: str, *, actor_id: str | None = None, json=None):
+    async def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        actor_id: str | None = None,
+        json=None,
+        timeout: float | None = None,
+    ):
         if not self.enabled:
             raise ManagedMCPRuntimeError('managed MCP runtime is not configured')
         headers = {'Authorization': f'Bearer {self.token}'}
         if actor_id:
             headers['X-Actor-Id'] = actor_id
         try:
-            async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
+            async with httpx.AsyncClient(
+                timeout=self.timeout if timeout is None else timeout,
+                trust_env=False,
+            ) as client:
                 response = await client.request(method, f'{self.base_url}{path}', headers=headers, json=json)
         except httpx.HTTPError as exc:
             raise ManagedMCPRuntimeError(
@@ -98,6 +109,39 @@ class ManagedMCPRuntimeClient:
         if response.status_code == 204:
             return None
         return response.json()
+
+    async def health_diagnostic(self, timeout: float = 1.0) -> dict[str, Any]:
+        """Return a bounded, secret-free runtime diagnostic that never raises."""
+        if not self.enabled:
+            return {
+                'configured': False,
+                'available': None,
+                'status': 'disabled',
+            }
+        try:
+            result = await self.request('GET', '/readyz', timeout=timeout)
+            runtime_status = result.get('status', 'unknown') if isinstance(result, dict) else 'unknown'
+            failed_servers = result.get('failed_servers', []) if isinstance(result, dict) else []
+            return {
+                'configured': True,
+                'available': True,
+                'status': runtime_status if runtime_status in {'ready', 'degraded'} else 'unknown',
+                'failed_server_count': len(failed_servers) if isinstance(failed_servers, list) else 0,
+            }
+        except ManagedMCPRuntimeError as exc:
+            return {
+                'configured': True,
+                'available': False,
+                'status': 'unavailable',
+                'error_code': exc.code,
+            }
+        except Exception:
+            return {
+                'configured': True,
+                'available': False,
+                'status': 'unavailable',
+                'error_code': 'runtime_diagnostic_failed',
+            }
 
     async def list_servers(self) -> list[dict[str, Any]]:
         return await self.request('GET', '/api/servers')

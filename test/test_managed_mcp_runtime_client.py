@@ -1,3 +1,4 @@
+import importlib
 import json
 
 import httpx
@@ -16,9 +17,11 @@ def anyio_backend():
 class FakeAsyncClient:
     response = httpx.Response(200, json=[])
     request_data = None
+    init_kwargs = None
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        type(self).init_kwargs = kwargs
 
     async def __aenter__(self):
         return self
@@ -48,6 +51,100 @@ async def test_runtime_client_uses_discovery_endpoint(monkeypatch):
     assert result['services'] == []
     method, url, _ = FakeAsyncClient.request_data
     assert (method, url) == ('GET', 'http://127.0.0.1:9090/api/discovery')
+
+
+async def test_runtime_health_diagnostic_reports_disabled_when_unconfigured():
+    client = ManagedMCPRuntimeClient('', '')
+
+    assert await client.health_diagnostic() == {
+        'configured': False,
+        'available': None,
+        'status': 'disabled',
+    }
+
+
+async def test_runtime_health_diagnostic_reports_ready_and_uses_short_timeout(monkeypatch):
+    monkeypatch.setattr(httpx, 'AsyncClient', FakeAsyncClient)
+    FakeAsyncClient.response = httpx.Response(
+        200,
+        json={'status': 'ready', 'failed_servers': []},
+    )
+    client = ManagedMCPRuntimeClient('http://runtime', 'secret', timeout=30)
+
+    assert await client.health_diagnostic(timeout=0.75) == {
+        'configured': True,
+        'available': True,
+        'status': 'ready',
+        'failed_server_count': 0,
+    }
+    assert FakeAsyncClient.request_data[:2] == ('GET', 'http://runtime/readyz')
+    assert FakeAsyncClient.init_kwargs['timeout'] == 0.75
+    assert FakeAsyncClient.init_kwargs['trust_env'] is False
+
+
+async def test_runtime_health_diagnostic_reports_degraded_without_server_ids(monkeypatch):
+    monkeypatch.setattr(httpx, 'AsyncClient', FakeAsyncClient)
+    FakeAsyncClient.response = httpx.Response(
+        200,
+        json={'status': 'degraded', 'failed_servers': ['calendar', 'web']},
+    )
+    client = ManagedMCPRuntimeClient('http://runtime', 'secret')
+
+    diagnostic = await client.health_diagnostic()
+
+    assert diagnostic == {
+        'configured': True,
+        'available': True,
+        'status': 'degraded',
+        'failed_server_count': 2,
+    }
+    assert 'calendar' not in str(diagnostic)
+
+
+async def test_runtime_health_diagnostic_contains_safe_error_code_only(monkeypatch):
+    async def unavailable(*args, **kwargs):
+        raise ManagedMCPRuntimeError(
+            'connection to http://secret-runtime failed with token secret',
+            code='runtime_connection_failed',
+            retryable=True,
+        )
+
+    client = ManagedMCPRuntimeClient('http://runtime', 'secret')
+    monkeypatch.setattr(client, 'request', unavailable)
+
+    diagnostic = await client.health_diagnostic()
+
+    assert diagnostic == {
+        'configured': True,
+        'available': False,
+        'status': 'unavailable',
+        'error_code': 'runtime_connection_failed',
+    }
+    assert 'secret-runtime' not in str(diagnostic)
+
+
+async def test_backend_health_remains_successful_when_runtime_is_unavailable(monkeypatch):
+    main = importlib.import_module('open_webui.main')
+
+    async def unavailable():
+        return {
+            'configured': True,
+            'available': False,
+            'status': 'unavailable',
+            'error_code': 'runtime_connection_failed',
+        }
+
+    monkeypatch.setattr(main.managed_mcp_runtime, 'health_diagnostic', unavailable)
+
+    assert await main.healthcheck() == {
+        'status': True,
+        'managed_mcp': {
+            'configured': True,
+            'available': False,
+            'status': 'unavailable',
+            'error_code': 'runtime_connection_failed',
+        },
+    }
 
 
 async def test_runtime_client_surfaces_runtime_errors(monkeypatch):

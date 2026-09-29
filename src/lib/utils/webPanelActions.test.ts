@@ -1,6 +1,34 @@
 import { describe, expect, it } from 'vitest';
 
-import { normalizeChallengeResult, withWebPanelTemporalContext } from './webPanelActions';
+import {
+	isMatchingWebPanelCapture,
+	normalizeChallengeResult,
+	withWebPanelTemporalContext
+} from './webPanelActions';
+
+describe('isMatchingWebPanelCapture', () => {
+	const pending = { requestId: 'capture-1', generation: 4 };
+
+	it('accepts only the expected response from the current navigation generation', () => {
+		expect(
+			isMatchingWebPanelCapture(
+				pending,
+				{ type: 'document-captured', requestId: 'capture-1', generation: 4 },
+				4
+			)
+		).toBe(true);
+	});
+
+	it.each([
+		[null, { type: 'document-captured', requestId: 'capture-1', generation: 4 }, 4],
+		[pending, { type: 'selection-action', requestId: 'capture-1', generation: 4 }, 4],
+		[pending, { type: 'document-captured', requestId: 'other', generation: 4 }, 4],
+		[pending, { type: 'document-captured', requestId: 'capture-1', generation: 3 }, 4],
+		[pending, { type: 'document-captured', requestId: 'capture-1', generation: 4 }, 5]
+	])('rejects missing, unsolicited, or stale captures', (candidate, message, generation) => {
+		expect(isMatchingWebPanelCapture(candidate, message, generation)).toBe(false);
+	});
+});
 
 describe('withWebPanelTemporalContext', () => {
 	it('adds a deterministic current-date reference to every action instruction', () => {

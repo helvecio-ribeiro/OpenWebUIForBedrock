@@ -97,3 +97,26 @@ Run its focused tests from the repository root with:
 ```bash
 examples/managed-mcp/web-research-tools/.venv/bin/python -m pytest -q test/test_web_research_mcp.py
 ```
+
+### Live model behavior evaluation
+
+`web-research-tools/evaluate_models.py` evaluates real configured models through Lambda WebUI rather than treating mocked model output as evidence. It verifies the administrator-only opt-in `tool_trace` returned by synchronous chat completions and checks that a model:
+
+- uses exactly one `fetch_web_page` call for a known single page;
+- selects `crawl_website` first and respects scenario depth/page ceilings for related pages; and
+- follows a large fetch with `search_web_artifact` or `read_web_artifact` instead of relying only on the inline preview.
+
+The trace contains bounded, credential-redacted tool arguments and error flags, never tool results. Normal chat requests do not include it; the backend honors `include_tool_trace` only for administrators.
+
+Copy `evaluation.example.json`, replace its model IDs and URLs, and host deterministic public fixture pages containing the configured marker strings. The fixture must be publicly reachable because Local Web Research correctly rejects loopback and private addresses. Put the large-page marker after more than `MCP_WEB_INLINE_CHARACTERS` of meaningful text so the artifact path is exercised. Then run:
+
+```bash
+export LAMBDA_WEBUI_URL=https://lambda-webui.example.com
+export LAMBDA_WEBUI_API_TOKEN='administrator-token'
+
+python examples/managed-mcp/web-research-tools/evaluate_models.py \
+  examples/managed-mcp/web-research-tools/evaluation.json \
+  --output web-research-evaluation-report.json
+```
+
+The command exits nonzero if any model/scenario fails and writes a schema-versioned JSON report containing timings, final answers, sanitized tool traces, and failure reasons. Evaluation reports may still contain public page text from model answers; review them before sharing. The example configuration is not runnable unchanged because its `.example` host and model ID are deliberate placeholders.

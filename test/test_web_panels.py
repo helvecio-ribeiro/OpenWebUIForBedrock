@@ -104,6 +104,26 @@ def test_proxy_rejects_non_public_addresses(address):
         validate_public_ip(address)
 
 
+def test_proxy_header_limits_accommodate_large_site_security_policies(monkeypatch):
+    captured = {}
+
+    class FakeSession:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(router.aiohttp, 'ClientSession', FakeSession)
+
+    timeout = router.aiohttp.ClientTimeout(total=20, connect=8)
+    connector = object()
+    router.create_web_panel_http_session(timeout, connector)
+
+    assert captured['timeout'] is timeout
+    assert captured['connector'] is connector
+    assert captured['auto_decompress'] is True
+    assert captured['max_line_size'] == 64 * 1024
+    assert captured['max_field_size'] == 64 * 1024
+
+
 def test_html_rewriter_removes_frame_policy_rewrites_resources_and_injects_bridge():
     rendered = rewrite_html(
         '<html><head><meta http-equiv="Content-Security-Policy" content="frame-ancestors none">'
@@ -120,6 +140,10 @@ def test_html_rewriter_removes_frame_policy_rewrites_resources_and_injects_bridg
     assert 'Find Bias' in rendered
     assert 'Translate Text' not in rendered
     assert 'extractReadablePage' in rendered
+    assert "message.type === 'capture-document'" in rendered
+    assert "type: 'document-captured'" in rendered
+    assert 'requestId: message.requestId' in rendered
+    assert 'generation: message.generation' in rendered
     assert 'selectionContext' in rendered
     assert "document.querySelector('article, main, [role=\"main\"]')" in rendered
     assert 'name="referrer"' in rendered

@@ -1,0 +1,28 @@
+{
+	"models": ["replace-with-model-id"],
+	"cases": [
+		{
+			"id": "single-known-page",
+			"kind": "single_page",
+			"prompt": "Read https://public-evaluation-host.example/single and report the evaluation marker found on that page.",
+			"expected": ["SINGLE_PAGE_MARKER"],
+			"max_tool_calls": 1
+		},
+		{
+			"id": "bounded-related-pages",
+			"kind": "bounded_crawl",
+			"prompt": "Starting at https://public-evaluation-host.example/, find the evaluation marker on its directly linked detail page. Inspect no more than five pages and do not follow links deeper than one level.",
+			"expected": ["CRAWL_DETAIL_MARKER"],
+			"max_depth": 1,
+			"max_pages": 5,
+			"max_tool_calls": 1
+		},
+		{
+			"id": "large-page-artifact",
+			"kind": "large_artifact",
+			"prompt": "Read https://public-evaluation-host.example/large and report the evaluation marker near the end of the document. Search or range-read any temporary artifact instead of guessing from its preview.",
+			"expected": ["LARGE_ARTIFACT_MARKER"],
+			"max_tool_calls": 5
+		}
+	]
+}

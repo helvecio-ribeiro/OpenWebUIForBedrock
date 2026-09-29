@@ -3577,6 +3577,27 @@ def get_non_streaming_tool_calls(response_data: dict | None) -> list[dict]:
     return _split_tool_calls(calls) if isinstance(calls, list) else []
 
 
+def sanitize_tool_trace_arguments(arguments, depth: int = 0):
+    """Bound evaluation traces and redact values whose names commonly carry credentials."""
+    if depth > 3:
+        return '[TRUNCATED]'
+    if isinstance(arguments, dict):
+        sanitized = {}
+        for key, value in list(arguments.items())[:50]:
+            if any(marker in str(key).lower() for marker in ('password', 'secret', 'token', 'cookie', 'authorization')):
+                sanitized[str(key)] = '[REDACTED]'
+            else:
+                sanitized[str(key)] = sanitize_tool_trace_arguments(value, depth + 1)
+        return sanitized
+    if isinstance(arguments, list):
+        return [sanitize_tool_trace_arguments(value, depth + 1) for value in arguments[:50]]
+    if isinstance(arguments, str):
+        return arguments[:1000]
+    if arguments is None or isinstance(arguments, (bool, int, float)):
+        return arguments
+    return str(arguments)[:1000]
+
+
 async def execute_non_streaming_server_tool_call(tool_call: dict, ctx) -> dict:
     """Execute one already-resolved server-side tool and return a tool message."""
     request = ctx['request']
@@ -3697,6 +3718,25 @@ async def complete_non_streaming_server_tool_loop(response, ctx):
         tool_messages = await asyncio.gather(
             *(execute_non_streaming_server_tool_call(call, ctx) for call in tool_calls)
         )
+        if getattr(request.state, 'include_tool_trace', False):
+            trace = ctx.setdefault('tool_trace', [])
+            for call, tool_message in zip(tool_calls, tool_messages):
+                function = call.get('function') or {}
+                arguments = function.get('arguments', {})
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except (TypeError, json.JSONDecodeError):
+                        arguments = {'_invalid_json': True}
+                trace.append(
+                    {
+                        'name': function.get('name', ''),
+                        'arguments': sanitize_tool_trace_arguments(arguments)
+                        if isinstance(arguments, dict)
+                        else {},
+                        'error': str(tool_message.get('content', '')).startswith('Error'),
+                    }
+                )
         form_data['messages'].extend(tool_messages)
 
         continuation = {
@@ -3733,6 +3773,9 @@ async def non_streaming_chat_response_handler(response, ctx):
     response, response_data = get_response_data(response)
     if response_data is None:
         return response
+    if getattr(request.state, 'include_tool_trace', False):
+        response_data['tool_trace'] = ctx.get('tool_trace', [])
+        response = build_response_object(response, response_data)
 
     chat_id = metadata.get('chat_id') or ''
     save_to_chat = is_saved_chat_id(chat_id)

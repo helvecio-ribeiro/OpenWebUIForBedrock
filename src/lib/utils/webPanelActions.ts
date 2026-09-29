@@ -6,6 +6,28 @@ const CHALLENGE_SECTION_TITLES: Record<string, string> = {
 	'how to verify': 'How to verify'
 };
 
+export type PendingWebPanelCapture = {
+	requestId: string;
+	generation: number;
+};
+
+/** Reject stale, unsolicited, and cross-navigation Browser capture responses. */
+export const isMatchingWebPanelCapture = (
+	pending: PendingWebPanelCapture | null,
+	message: unknown,
+	currentGeneration: number
+) => {
+	if (!pending || !message || typeof message !== 'object') return false;
+	const candidate = message as { type?: unknown; requestId?: unknown; generation?: unknown };
+	return (
+		candidate.type === 'document-captured' &&
+		typeof candidate.requestId === 'string' &&
+		candidate.requestId === pending.requestId &&
+		candidate.generation === pending.generation &&
+		pending.generation === currentGeneration
+	);
+};
+
 const normalizeVerdict = (value: string) => {
 	const verdict = value
 		.trim()

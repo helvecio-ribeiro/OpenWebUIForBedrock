@@ -1,15 +1,20 @@
 import importlib.util
+import os
 import shutil
 import socket
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
 import yaml
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / 'examples/managed-mcp/web-research-tools'
+STDIO_FIXTURE = ROOT / 'test/fixtures/web_research_stdio_server.py'
 
 
 def load_module(name: str, filename: str):
@@ -427,3 +432,89 @@ def test_server_externalizes_large_results_and_advertises_artifact_tools(monkeyp
     assert sum(len(page['content']) for page in crawl_response['pages']) == 40
     assert crawl_response['artifact']['source_count'] == 2
     shutil.rmtree(artifact_directory, ignore_errors=True)
+
+
+@pytest.mark.anyio
+async def test_all_tools_work_through_mcp_client_session_over_stdio():
+    artifact_name = f'pytest-stdio-{uuid.uuid4().hex}'
+    artifact_directory = PACKAGE / 'data' / artifact_name
+    environment = {
+        **os.environ,
+        'PYTHONPATH': str(PACKAGE),
+        'MCP_WEB_ARTIFACT_DIR': f'data/{artifact_name}',
+        'MCP_WEB_INLINE_CHARACTERS': '80',
+        'MCP_WEB_CRAWL_DELAY_SECONDS': '0',
+    }
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=[str(STDIO_FIXTURE)],
+        env=environment,
+        cwd=str(PACKAGE),
+    )
+
+    try:
+        async with stdio_client(parameters) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                initialized = await session.initialize()
+                assert initialized.serverInfo.name == 'Local Web Research'
+
+                listed = await session.list_tools()
+                assert {tool.name for tool in listed.tools} == {
+                    'fetch_web_page',
+                    'crawl_website',
+                    'read_web_artifact',
+                    'search_web_artifact',
+                }
+
+                fetched = await session.call_tool(
+                    'fetch_web_page',
+                    {'url': 'https://fixture.example/', 'output_format': 'text'},
+                )
+                assert fetched.isError is False
+                assert fetched.structuredContent is not None
+                assert fetched.structuredContent['inline_truncated'] is True
+                artifact = fetched.structuredContent['artifact']
+                assert artifact['source_count'] == 1
+
+                searched = await session.call_tool(
+                    'search_web_artifact',
+                    {
+                        'artifact_id': artifact['id'],
+                        'query': 'fixture evidence',
+                        'max_matches': 2,
+                        'context_characters': 20,
+                    },
+                )
+                assert searched.isError is False
+                assert searched.structuredContent['returned_matches'] == 2
+
+                read = await session.call_tool(
+                    'read_web_artifact',
+                    {
+                        'artifact_id': artifact['id'],
+                        'source_index': 0,
+                        'offset': 0,
+                        'max_characters': 32,
+                    },
+                )
+                assert read.isError is False
+                assert read.structuredContent['content'] == 'Deterministic fixture evidence. '
+                assert read.structuredContent['has_more'] is True
+
+                crawled = await session.call_tool(
+                    'crawl_website',
+                    {
+                        'start_url': 'https://fixture.example/',
+                        'max_depth': 1,
+                        'max_pages': 2,
+                        'output_format': 'text',
+                    },
+                )
+                assert crawled.isError is False
+                assert crawled.structuredContent['returned_total'] == 2
+                assert [page['url'] for page in crawled.structuredContent['pages']] == [
+                    'https://fixture.example/',
+                    'https://fixture.example/child',
+                ]
+    finally:
+        shutil.rmtree(artifact_directory, ignore_errors=True)

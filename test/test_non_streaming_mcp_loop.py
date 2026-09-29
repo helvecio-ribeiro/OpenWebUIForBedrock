@@ -58,7 +58,7 @@ def make_context(tool_callable):
 def test_non_streaming_completion_executes_mcp_and_returns_final_answer(monkeypatch):
     calls = []
 
-    async def current_datetime():
+    async def current_datetime(**_kwargs):
         return {'date': '2026-09-11', 'timezone': 'America/Mexico_City'}
 
     async def finish(request, form_data, user, bypass_system_prompt=False):
@@ -86,6 +86,43 @@ def test_non_streaming_completion_executes_mcp_and_returns_final_answer(monkeypa
     assert messages[-2]['tool_calls'][0]['function']['name'] == 'local-system-tools_get_current_datetime'
     assert messages[-1]['role'] == 'tool'
     assert '2026-09-11' in messages[-1]['content']
+
+
+def test_non_streaming_completion_records_opt_in_tool_trace_without_results(monkeypatch):
+    async def current_datetime(**_kwargs):
+        return {'date': '2026-09-11', 'private_result': 'must not enter trace'}
+
+    async def finish(request, form_data, user, bypass_system_prompt=False):
+        return {'choices': [{'message': {'role': 'assistant', 'content': 'Finished.'}}]}
+
+    monkeypatch.setattr(middleware, 'generate_chat_completion', finish)
+    ctx = make_context(current_datetime)
+    ctx['request'].state.include_tool_trace = True
+
+    asyncio.run(middleware.complete_non_streaming_server_tool_loop(tool_response('{"timezone":"UTC"}'), ctx))
+
+    assert ctx['tool_trace'] == [
+        {
+            'name': 'local-system-tools_get_current_datetime',
+            'arguments': {'timezone': 'UTC'},
+            'error': False,
+        }
+    ]
+    assert 'private_result' not in str(ctx['tool_trace'])
+
+
+def test_tool_trace_argument_sanitizer_bounds_and_redacts_values():
+    result = middleware.sanitize_tool_trace_arguments(
+        {
+            'url': 'https://example.com/' + ('a' * 2000),
+            'api_token': 'sensitive',
+            'nested': {'password': 'sensitive', 'count': 3},
+        }
+    )
+
+    assert len(result['url']) == 1000
+    assert result['api_token'] == '[REDACTED]'
+    assert result['nested'] == {'password': '[REDACTED]', 'count': 3}
 
 
 def test_non_streaming_completion_stops_repeated_tool_calls(monkeypatch):

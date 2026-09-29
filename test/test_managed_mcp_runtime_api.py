@@ -116,6 +116,15 @@ runtime:
         registered = await client.get('/api/discovery', headers=headers)
         assert registered.json()['services'][0]['discovery_state'] == 'registered'
 
+        actor = FakeActor()
+        actor.state = ServerState.failed
+        actor.last_error = 'fixture process exited'
+        app.state.supervisor.actors['demo'] = actor
+        failed = await client.get('/api/discovery', headers=headers)
+        failed_service = failed.json()['services'][0]
+        assert failed_service['runtime_state'] == 'failed'
+        assert failed_service['runtime_error'] == 'fixture process exited'
+
         removed = await client.delete('/api/servers/demo', headers=headers)
         assert removed.status_code == 204
         available = await client.get('/api/discovery', headers=headers)

@@ -15,7 +15,8 @@ export type DiscoveredManagedMCPService = {
 	package_digest: string;
 	discovery_state: 'available' | 'registered' | 'conflict';
 	enabled: boolean;
-	runtime_state: string | null;
+	runtime_state: ManagedMCPRuntimeState | null;
+	runtime_error?: string | null;
 	environment: Record<string, ManagedMCPEnvironmentSetting>;
 	security: {
 		profile: 'confined' | 'system-admin';
@@ -23,6 +24,22 @@ export type DiscoveredManagedMCPService = {
 		root_write: boolean;
 		filesystem_roots: string[];
 	};
+};
+
+export type ManagedMCPRuntimeState =
+	| 'stopped'
+	| 'starting'
+	| 'ready'
+	| 'failed'
+	| 'stopping'
+	| 'unavailable';
+
+export type ManagedMCPServerStatus = {
+	id: string;
+	enabled: boolean;
+	state: Exclude<ManagedMCPRuntimeState, 'unavailable'>;
+	last_error: string | null;
+	tools: { name: string; description?: string }[];
 };
 
 export type ManagedMCPDiscovery = {
@@ -64,6 +81,9 @@ const request = async <T>(token: string, path: string, init: RequestInit = {}): 
 
 export const discoverManagedMCPServices = (token: string) =>
 	request<ManagedMCPDiscovery>(token, '/discover');
+
+export const listManagedMCPServices = (token: string) =>
+	request<ManagedMCPServerStatus[]>(token, '/');
 
 export const registerManagedMCPService = (token: string, service: DiscoveredManagedMCPService) => {
 	const environment = Object.fromEntries(

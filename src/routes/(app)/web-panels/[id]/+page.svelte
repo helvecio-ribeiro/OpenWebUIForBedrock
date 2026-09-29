@@ -20,6 +20,7 @@
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import { copyToClipboard } from '$lib/utils';
 	import {
+		isMatchingWebPanelCapture,
 		normalizeChallengeResult,
 		withWebPanelTemporalContext
 	} from '$lib/utils/webPanelActions';
@@ -28,6 +29,7 @@
 	let address = '';
 	let frameUrl = '';
 	let frameKey = 0;
+	let frameGeneration = 0;
 	let loading = true;
 	let loadedId = '';
 	let mounted = false;
@@ -43,10 +45,17 @@
 	let embeddedLogo = '';
 	let panelViewport: HTMLDivElement | null = null;
 	let resultPopover: HTMLDivElement | null = null;
-	let selectionRect: { left: number; top: number; right: number; bottom: number } | null = null;
+	type SelectionRect = { left: number; top: number; right: number; bottom: number };
+	let selectionRect: SelectionRect | null = null;
 	let popoverLeft = 16;
 	let popoverTop = 16;
 	let popoverPositioned = false;
+	let pendingCapture: {
+		requestId: string;
+		generation: number;
+		timeout: ReturnType<typeof setTimeout>;
+		rect: SelectionRect | null;
+	} | null = null;
 	const actionLabels: Record<string, string> = {
 		explain: 'Explain Text',
 		'find-bias': 'Find Bias',
@@ -128,6 +137,8 @@
 	};
 
 	const loadFrame = async () => {
+		cancelPendingCapture();
+		frameGeneration += 1;
 		if (!panel?.url) {
 			frameUrl = '';
 			return;
@@ -189,10 +200,55 @@
 
 	const navigateHistory = (action: 'back' | 'forward' | 'reload') => {
 		if (!frameElement?.contentWindow) return;
+		cancelPendingCapture();
+		frameGeneration += 1;
 		frameElement.contentWindow.postMessage(
 			{ source: 'open-webui-web-panel-host', type: 'navigation', action },
 			'*'
 		);
+	};
+
+	const cancelPendingCapture = (message = '') => {
+		if (!pendingCapture) return;
+		clearTimeout(pendingCapture.timeout);
+		pendingCapture = null;
+		if (message) {
+			aiPending = false;
+			aiResult = message;
+			void positionResultPopover();
+		}
+	};
+
+	const requestDocumentCapture = (rect: SelectionRect | null) => {
+		if (!frameElement?.contentWindow) {
+			toast.error('The Browser page is not ready');
+			return;
+		}
+		cancelPendingCapture();
+		selectedAction = 'summarize-page';
+		selectedPassage = 'Entire page';
+		selectionRect = rect;
+		aiResult = '';
+		aiPending = true;
+		const requestId = crypto.randomUUID();
+		const generation = frameGeneration;
+		const timeout = setTimeout(() => {
+			if (pendingCapture?.requestId !== requestId) return;
+			cancelPendingCapture(
+				'The page did not provide a readable document before the capture timed out.'
+			);
+		}, 5000);
+		pendingCapture = { requestId, generation, timeout, rect };
+		frameElement.contentWindow.postMessage(
+			{
+				source: 'open-webui-web-panel-host',
+				type: 'capture-document',
+				requestId,
+				generation
+			},
+			'*'
+		);
+		void positionResultPopover();
 	};
 
 	const runSelectionAction = async (action: string, text: string, context = '') => {
@@ -275,6 +331,8 @@
 		const data = event.data;
 		if (data?.source !== 'open-webui-web-panel') return;
 		if (data.type === 'navigated' && typeof data.url === 'string' && panel) {
+			cancelPendingCapture();
+			frameGeneration += 1;
 			address = data.url;
 			if (data.url !== panel.url) {
 				const updated = await updateWebPanel(localStorage.token, panel.id, { url: data.url }).catch(
@@ -282,10 +340,30 @@
 				);
 				if (updated) panel = updated;
 			}
+		} else if (isMatchingWebPanelCapture(pendingCapture, data, frameGeneration)) {
+			const captured = pendingCapture;
+			if (!captured) return;
+			clearTimeout(captured.timeout);
+			pendingCapture = null;
+			const text = typeof data.text === 'string' ? data.text.slice(0, 50000).trim() : '';
+			if (!text) {
+				aiPending = false;
+				aiResult = 'No readable page content was available after JavaScript execution.';
+				void positionResultPopover();
+				return;
+			}
+			selectionRect = captured.rect;
+			selectionPageTitle = typeof data.title === 'string' ? data.title.slice(0, 500) : '';
+			selectionPageUrl = typeof data.url === 'string' ? data.url.slice(0, 4000) : '';
+			await runSelectionAction('summarize-page', text);
 		} else if (data.type === 'selection-action' && typeof data.text === 'string') {
 			selectionRect = data.rect ?? null;
 			selectionPageTitle = typeof data.title === 'string' ? data.title : '';
 			selectionPageUrl = typeof data.url === 'string' ? data.url : '';
+			if (data.action === 'summarize-page') {
+				requestDocumentCapture(selectionRect);
+				return;
+			}
 			await runSelectionAction(
 				data.action,
 				data.text.slice(0, data.action === 'summarize-page' ? 50000 : 12000),
@@ -302,6 +380,7 @@
 		window.addEventListener('message', handlePanelMessage);
 		window.addEventListener('resize', positionResultPopover);
 		return () => {
+			cancelPendingCapture();
 			window.removeEventListener('message', handlePanelMessage);
 			window.removeEventListener('resize', positionResultPopover);
 		};

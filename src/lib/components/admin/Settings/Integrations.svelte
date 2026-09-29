@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
+	import { createEventDispatcher, onDestroy, onMount, getContext, tick } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import type { i18n as i18nType } from 'i18next';
 
@@ -28,10 +28,12 @@
 	import AdminSettingSection from './AdminSettingSection.svelte';
 	import {
 		discoverManagedMCPServices,
+		listManagedMCPServices,
 		registerManagedMCPService,
 		removeManagedMCPService,
 		type DiscoveredManagedMCPService,
-		type ManagedMCPDiscovery
+		type ManagedMCPDiscovery,
+		type ManagedMCPRuntimeState
 	} from '$lib/apis/managed-mcp';
 
 	import {
@@ -62,6 +64,64 @@
 	let removingManagedMCP: string | null = null;
 	let managedMCPPendingRemoval: DiscoveredManagedMCPService | null = null;
 	let showManagedMCPRemoveConfirm = false;
+	let managedMCPStatusTimer: ReturnType<typeof setInterval> | null = null;
+
+	const managedMCPStatusLabel = (service: DiscoveredManagedMCPService) => {
+		if (!service.enabled) return $i18n.t('Disabled');
+		const labels: Record<ManagedMCPRuntimeState, string> = {
+			stopped: $i18n.t('Stopped'),
+			starting: $i18n.t('Starting'),
+			ready: $i18n.t('Ready'),
+			failed: $i18n.t('Failed'),
+			stopping: $i18n.t('Stopping'),
+			unavailable: $i18n.t('Unavailable')
+		};
+		return service.runtime_state ? labels[service.runtime_state] : $i18n.t('Unknown');
+	};
+
+	const managedMCPStatusClass = (service: DiscoveredManagedMCPService) => {
+		if (!service.enabled || service.runtime_state === 'stopped') {
+			return 'text-gray-500 dark:text-gray-400';
+		}
+		if (service.runtime_state === 'ready') return 'text-green-600 dark:text-green-400';
+		if (service.runtime_state === 'failed' || service.runtime_state === 'unavailable') {
+			return 'text-red-600 dark:text-red-400';
+		}
+		return 'text-amber-600 dark:text-amber-400';
+	};
+
+	const refreshManagedMCPStatuses = async () => {
+		const discovery = managedMCPDiscovery;
+		if (!discovery) return;
+		try {
+			const statuses = await listManagedMCPServices(localStorage.token);
+			const statusById = new Map(statuses.map((status) => [status.id, status]));
+			managedMCPDiscovery = {
+				...discovery,
+				services: discovery.services.map((service) => {
+					const status = statusById.get(service.id);
+					return service.discovery_state === 'registered' && status
+						? {
+								...service,
+								enabled: status.enabled,
+								runtime_state: status.state,
+								runtime_error: status.last_error
+							}
+						: service;
+				})
+			};
+		} catch (error) {
+			const message = error instanceof Error ? error.message : $i18n.t('Runtime unavailable');
+			managedMCPDiscovery = {
+				...discovery,
+				services: discovery.services.map((service) =>
+					service.discovery_state === 'registered'
+						? { ...service, runtime_state: 'unavailable', runtime_error: message }
+						: service
+				)
+			};
+		}
+	};
 
 	const discoverManagedMCP = async () => {
 		managedMCPLoading = true;
@@ -184,20 +244,28 @@
 		saveTerminalServers();
 	};
 
-	onMount(async () => {
-		const res = await getToolServerConnections(localStorage.token);
-		servers = (res.TOOL_SERVER_CONNECTIONS as ToolServerConnection[]).filter(
-			(server) => server.type === 'mcp'
-		);
+	onMount(() => {
+		const initialize = async () => {
+			const res = await getToolServerConnections(localStorage.token);
+			servers = (res.TOOL_SERVER_CONNECTIONS as ToolServerConnection[]).filter(
+				(server) => server.type === 'mcp'
+			);
 
-		try {
-			const terminalRes = await getTerminalServerConnections(localStorage.token);
-			if (terminalRes?.TERMINAL_SERVER_CONNECTIONS) {
-				terminalConnections = terminalRes.TERMINAL_SERVER_CONNECTIONS as TerminalConnection[];
+			try {
+				const terminalRes = await getTerminalServerConnections(localStorage.token);
+				if (terminalRes?.TERMINAL_SERVER_CONNECTIONS) {
+					terminalConnections = terminalRes.TERMINAL_SERVER_CONNECTIONS as TerminalConnection[];
+				}
+			} catch {
+				// Not configured yet
 			}
-		} catch {
-			// Not configured yet
-		}
+		};
+		initialize();
+		managedMCPStatusTimer = setInterval(refreshManagedMCPStatuses, 5000);
+	});
+
+	onDestroy(() => {
+		if (managedMCPStatusTimer) clearInterval(managedMCPStatusTimer);
 	});
 </script>
 
@@ -301,8 +369,11 @@
 											</span>
 										{:else if service.discovery_state === 'registered'}
 											<div class="flex shrink-0 items-center gap-2">
-												<span class="text-[0.6875rem] text-green-600 dark:text-green-400">
-													{$i18n.t('Registered')} · {service.runtime_state ?? $i18n.t('stopped')}
+												<span
+													class="text-[0.6875rem] {managedMCPStatusClass(service)}"
+													title={service.runtime_error ?? managedMCPStatusLabel(service)}
+												>
+													{managedMCPStatusLabel(service)}
 												</span>
 												<button
 													class="rounded-full border border-red-200 px-3 py-1 text-xs text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"

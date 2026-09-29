@@ -198,13 +198,6 @@ def selection_bridge(remote_url: str, panel_id: str, token: str) -> str:
   const nativeOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url, ...rest) {{ return nativeOpen.call(this, method, throughProxy(url), ...rest); }};
   const send = (message) => parent.postMessage({{ source: 'open-webui-web-panel', ...message }}, '*');
-  window.addEventListener('message', (event) => {{
-    const message = event.data;
-    if (event.source !== parent || message?.source !== 'open-webui-web-panel-host' || message?.type !== 'navigation') return;
-    if (message.action === 'back') history.back();
-    else if (message.action === 'forward') history.forward();
-    else if (message.action === 'reload') location.reload();
-  }});
   let selectionRect = null;
   let selectionContext = '';
   const extractReadablePage = () => {{
@@ -231,6 +224,28 @@ def selection_bridge(remote_url: str, panel_id: str, token: str) -> str:
       .join('\\n\\n')
       .slice(0, 50000);
   }};
+  window.addEventListener('message', (event) => {{
+    const message = event.data;
+    if (event.source !== parent || message?.source !== 'open-webui-web-panel-host') return;
+    if (message.type === 'navigation') {{
+      if (message.action === 'back') history.back();
+      else if (message.action === 'forward') history.forward();
+      else if (message.action === 'reload') location.reload();
+    }} else if (
+      message.type === 'capture-document' &&
+      typeof message.requestId === 'string' &&
+      message.requestId.length <= 100
+    ) {{
+      send({{
+        type: 'document-captured',
+        requestId: message.requestId,
+        generation: message.generation,
+        text: extractReadablePage(),
+        url: remoteUrl,
+        title: document.title
+      }});
+    }}
+  }});
   send({{ type: 'navigated', url: remoteUrl, title: document.title }});
   const menu = document.createElement('div');
   Object.assign(menu.style, {{position:'fixed',display:'none',zIndex:'2147483647',background:'#18181b',color:'white',padding:'5px',borderRadius:'10px',boxShadow:'0 6px 22px #0006',font:'13px system-ui'}});
@@ -248,10 +263,11 @@ def selection_bridge(remote_url: str, panel_id: str, token: str) -> str:
       event.stopPropagation();
       const selection = window.getSelection();
       const selectedText = selection ? selection.toString().trim() : '';
-      const text = item.action === 'summarize-page'
-        ? extractReadablePage()
-        : selectedText;
-      if (text) send({{type:'selection-action', action:item.action, text, context:selectionContext, url:remoteUrl, title:document.title, rect:selectionRect}});
+      if (item.action === 'summarize-page') {{
+        send({{type:'selection-action', action:item.action, text:'', context:'', url:remoteUrl, title:document.title, rect:selectionRect}});
+      }} else if (selectedText) {{
+        send({{type:'selection-action', action:item.action, text:selectedText, context:selectionContext, url:remoteUrl, title:document.title, rect:selectionRect}});
+      }}
       menu.style.display = 'none';
     }};
     menu.appendChild(button);

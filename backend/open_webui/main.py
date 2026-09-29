@@ -242,6 +242,7 @@ from open_webui.utils.middleware import (
     process_chat_payload,
     process_chat_response,
 )
+from open_webui.utils.mcp.runtime_client import managed_mcp_runtime
 from open_webui.utils.model_ids import strip_provider_model_prefix
 from open_webui.utils.models import (
     check_model_access,
@@ -263,7 +264,7 @@ from open_webui.utils.oauth import (
 )
 from open_webui.utils.redis import get_redis_client
 from open_webui.utils.security_headers import SecurityHeadersMiddleware
-from open_webui.utils.session_pool import cleanup_response, get_session, stream_wrapper
+from open_webui.utils.session_pool import close_session, cleanup_response, get_session, stream_wrapper
 from open_webui.utils.tools import set_terminal_servers, set_tool_servers
 
 if SAFE_MODE:
@@ -443,8 +444,6 @@ async def lifespan(app: FastAPI):
     await publish_event(app, EVENTS.SYSTEM_SHUTDOWN_STARTED, source='system')
 
     # Shutdown: clean up shared resources
-    from open_webui.utils.session_pool import close_session
-
     await close_session()
 
     if hasattr(app.state, 'redis_task_command_listener'):
@@ -1051,6 +1050,7 @@ async def chat_completion(
     form_data: dict,
     user=Depends(get_verified_user),
 ):
+    request.state.include_tool_trace = bool(form_data.pop('include_tool_trace', False)) and user.role == 'admin'
     if not request.app.state.MODELS:
         await get_all_models(request, user=user)
 
@@ -2741,7 +2741,10 @@ async def async_db_ping() -> None:
 
 @app.get('/health')
 async def healthcheck():
-    return {'status': True}
+    return {
+        'status': True,
+        'managed_mcp': await managed_mcp_runtime.health_diagnostic(),
+    }
 
 
 @app.get('/ready')

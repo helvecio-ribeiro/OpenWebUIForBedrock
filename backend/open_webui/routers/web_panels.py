@@ -24,7 +24,25 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
+
+# Some public sites, notably Yahoo Finance, send Content-Security-Policy headers
+# larger than aiohttp's 8,190-byte default. Keep the allowance scoped to the Web
+# Panel proxy and bounded rather than weakening every outbound HTTP client.
+WEB_PANEL_MAX_HEADER_LINE_BYTES = 64 * 1024
+WEB_PANEL_MAX_HEADER_FIELD_BYTES = 64 * 1024
 _panel_cookies: dict[str, dict[str, dict[str, str]]] = {}
+
+
+def create_web_panel_http_session(
+    timeout: aiohttp.ClientTimeout, connector: aiohttp.BaseConnector
+) -> aiohttp.ClientSession:
+    return aiohttp.ClientSession(
+        timeout=timeout,
+        auto_decompress=True,
+        connector=connector,
+        max_line_size=WEB_PANEL_MAX_HEADER_LINE_BYTES,
+        max_field_size=WEB_PANEL_MAX_HEADER_FIELD_BYTES,
+    )
 
 
 def validate_panel_url(value: str) -> str:
@@ -192,7 +210,7 @@ async def proxy_web_panel_content(panel_id: str, request: Request, token: str, u
     current_url = url
     try:
         connector = aiohttp.TCPConnector(resolver=PublicNetworkResolver())
-        async with aiohttp.ClientSession(timeout=timeout, auto_decompress=True, connector=connector) as session:
+        async with create_web_panel_http_session(timeout, connector) as session:
             for _ in range(6):
                 await validate_public_url(current_url)
                 async with session.request(

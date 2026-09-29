@@ -209,6 +209,7 @@ def create_app(settings: RuntimeSettings) -> FastAPI:
             if service['discovery_state'] == 'registered':
                 actor = supervisor.actors.get(service['id'])
                 service['runtime_state'] = actor.state.value if actor else ServerState.stopped.value
+                service['runtime_error'] = actor.last_error if actor else None
         return result
 
     @app.get('/api/schema/manifest', dependencies=[Depends(authenticate)])

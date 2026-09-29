@@ -2,7 +2,7 @@
 
 This document is the restart handoff and implementation checklist for adding locally managed MCP servers to Open WebUI. The rationale and settled architecture are recorded separately in [Managed MCP Runtime Design Decisions](managed-mcp-runtime-design.md).
 
-The core runtime, authenticated Open WebUI control plane, local discovery/Add/Remove administration slice, chat-tool integration, Local System Tools example, standalone Local Calendar example, and initial Local Web Research service are implemented. The phases below retain the original acceptance criteria and identify hardening or administration work that remains; they should not be read as evidence that the native Calendar or Notes features still exist. Both native implementations have been removed, and Calendar is now provided only by Local Calendar MCP. A future MCP Builder and validation workbench is tracked as a separate phase; generated candidates must remain isolated from installed services until an administrator explicitly publishes them.
+The core runtime, authenticated Open WebUI control plane, local discovery/Add/Remove administration slice, chat-tool integration, Local System Tools example, standalone Local Calendar example, and Local Web Research service with expiring artifact storage are implemented. The phases below retain the original acceptance criteria and identify hardening or administration work that remains; they should not be read as evidence that the native Calendar or Notes features still exist. Both native implementations have been removed, and Calendar is now provided only by Local Calendar MCP. A future MCP Builder and validation workbench is tracked as a separate phase; generated candidates must remain isolated from installed services until an administrator explicitly publishes them.
 
 ## Objective
 
@@ -92,7 +92,7 @@ Tasks:
 - [x] Reconcile enabled servers at backend/runtime startup.
 - [x] Publish audit events for register, start, stop, restart, configuration, access, and removal.
 - [x] Never expose install paths, environment, or logs to ordinary users.
-- [ ] Add runtime availability to backend health diagnostics without making remote MCP availability block Open WebUI startup.
+- [x] Add a bounded, secret-free managed-runtime diagnostic to the backend `/health` response. It reports disabled, ready, degraded, or unavailable state without changing the backend health status, readiness gate, or startup behavior.
 
 Backend integration points:
 
@@ -147,6 +147,7 @@ The first discovery slice is implemented: **Local MCP Services -> Discover Servi
 - [ ] Add server table: name, version, runtime, status, tool count, access, actions.
 - [ ] Add local-directory registration dialog with parsed manifest review.
 - [x] Add local-service discovery and one-click registration using manifest defaults.
+- [x] Show each registered service's live observed runtime state in Integrations, refresh it without rescanning packages or reloading the page, surface failure details to administrators, and mark stale states unavailable when the runtime cannot be reached.
 - [ ] Add overview, configuration, tools, access, logs, and revisions tabs.
 - [ ] Add start, stop, restart, diagnose, and remove actions with confirmation.
 - [ ] Show the active privilege profile and a persistent high-risk indicator for system-admin servers.
@@ -267,9 +268,9 @@ Acceptance criteria:
 - No model-facing tool or builder endpoint can install, activate, grant access to, or elevate a candidate.
 - Publishing creates a reviewable revision, activates only after a final protocol probe succeeds, and preserves a known-good rollback target.
 
-## Next managed service: Local Web Research
+## Managed service: Local Web Research
 
-Add `examples/managed-mcp/web-research-tools` as the third locally managed MCP package. Its purpose is to give models without native web access a controlled way to read one public page or traverse a small, bounded set of related pages. Implement both behaviors in one service so URL validation, fetching, extraction, caching, limits, and security policy have a single implementation.
+`examples/managed-mcp/web-research-tools` is the third locally managed MCP package. It gives models without native web access a controlled way to read one public page, traverse a small bounded set of related pages, and selectively retrieve large cleaned results through temporary artifacts. All four tools share URL validation, fetching, extraction, caching, storage limits, and security policy.
 
 ### Service contract
 
@@ -299,7 +300,7 @@ Add `examples/managed-mcp/web-research-tools` as the third locally managed MCP p
 - [x] Resolve and validate every hostname immediately before connecting, validate every resolved address, repeat validation after redirects, and pin the connection to the validated address to mitigate SSRF and DNS rebinding.
 - [x] Do not accept caller-provided headers, credentials, cookies, proxy settings, request bodies, or non-GET methods in the initial release.
 - [x] Do not submit forms, download files, authenticate to sites, or mutate remote state.
-- [ ] Add configurable domain allow/deny policies, per-domain rate limits, global concurrency limits, and crawl-delay behavior.
+- [ ] **Very low priority — Nice to Have:** Add configurable domain allow/deny policies, per-domain rate limits, global concurrency limits, and crawl-delay behavior.
 - [x] Define and document the service policy for `robots.txt`; crawling respects it by default and bypass requires explicit administrator configuration.
 - [x] Bound page bytes, extracted characters, crawl depth, total pages, combined characters, request time, and redirects. Links-per-page and total execution-time ceilings remain hardening work.
 - [x] Keep page bodies and response credentials out of application logs. Query-string redaction remains hardening work before adding request logging.
@@ -312,33 +313,41 @@ Add `examples/managed-mcp/web-research-tools` as the third locally managed MCP p
 - [x] Return artifact IDs, source indexes, titles, URLs, excerpts, creation time, expiration time, and truncation state; never expose host filesystem paths.
 - [x] Add quota and cleanup behavior for cached responses and artifacts. Response caching remains bounded in memory; artifacts enforce TTL, per-artifact, count, and total-byte ceilings with oldest-first eviction.
 
-### Optional JavaScript rendering
+### JavaScript-generated content from Browser sessions
 
-- [x] Do not require Chromium for the initial HTTP-fetch release.
-- [x] Detect likely application-shell responses and return a warning when meaningful content could not be extracted.
-- [ ] After the HTTP implementation is stable, add an optional `render_web_page` capability backed by an isolated headless browser.
-- [ ] Make browser availability discoverable in tool metadata and keep HTTP fetching as the default path.
-- [ ] Execute page JavaScript only in a sandboxed process with strict CPU, memory, navigation, download, popup, request, and wall-clock limits.
-- [ ] Apply the same destination validation to every browser subresource and navigation; block access to local services, private networks, metadata endpoints, downloads, permissions, and persistent browser storage.
-- [ ] Capture the rendered DOM and pass it through the same main-content extraction and normalization pipeline rather than returning an uncontrolled raw page.
+Do not add Chromium or another headless-browser runtime to Local Web Research. Lambda WebUI's existing Browser panel is already the JavaScript execution environment. Support JavaScript-generated pages by asking an active, authenticated panel session to capture its current post-JavaScript document, then process that snapshot through the same extraction and artifact pipeline as HTTP-fetched HTML.
+
+- [x] Keep Local Web Research independent of Chromium and other browser automation dependencies.
+- [x] Detect likely application-shell responses and return a warning when meaningful content could not be extracted through HTTP alone.
+- [x] Extend the injected Web Panel bridge with a request-ID- and navigation-generation-correlated operation that captures the current document only in response to its owning host frame.
+- [x] Keep capture client-local: the authenticated Browser host verifies the exact iframe source and sends the bounded result through the existing authenticated model request. No shared backend snapshot endpoint or MCP access to browser sessions is introduced.
+- [x] Capture a deliberately reduced readable-document representation without cookies, storage, credentials, event handlers, executable scripts, raw markup, or unrelated browser state.
+- [x] Define capture readiness and timeout behavior for pages that continue mutating; capture is explicitly requested by a Panel Action and never uploaded continuously.
+- [x] Pass captured readable text, title, and URL through the existing authenticated Browser Action request with a strict 50,000-character ceiling. Keep it out of the shared MCP artifact store so the managed service never receives browser-session identity or content; Browser capture and server-side research artifacts remain deliberately separate trust domains.
+- [x] Make session-capture availability explicit: the action is emitted by and returned to the matching loaded iframe, with a bounded timeout message when that active page cannot answer.
+- [x] Prevent another panel, tab, or navigation generation from satisfying a pending capture by checking the exact iframe window, unpredictable request ID, and current generation; cancel pending capture on navigation or component teardown.
+- [ ] **Very low priority — Nice to Have:** Add tests for bridge message provenance, nonce matching, ownership, navigation races, stale snapshots, sanitization, payload ceilings, timeout, and artifact externalization.
 
 ### Tests and acceptance criteria
 
 - [x] Add unit tests for URL normalization, redirect validation, IP classification, DNS results, content-type handling, extraction, Markdown conversion, output ceilings, and truncation metadata. Socket-level byte-limit tests remain.
 - [x] Add SSRF regression tests for local/private/metadata addresses, IPv4-mapped IPv6, localhost aliases, mixed-answer rebinding simulations, and redirect pivots. Additional exotic textual IP forms remain hardening work.
 - [x] Add crawler tests for cycles, duplicate/canonical URLs, fragments, cross-origin links, and depth ceilings. Include/exclude, cancellation, rate limiting, and partial-failure cases remain.
-- [ ] Use a controlled local HTTP fixture for deterministic integration tests; tests must not depend on public websites.
-- [ ] Verify calls through an MCP SDK `ClientSession` over managed stdio. Initialize and `tools/list` have direct stdio smoke coverage.
-- [ ] Verify the package can be discovered, registered, enabled per user, invoked from chat, stopped, and recovered after runtime restart.
-- [ ] Verify a model can fetch one page without receiving crawler complexity, and can request a bounded crawl without receiving unbounded content in its context.
+- [x] Add artifact tests for inline externalization, opaque IDs, bounded range reads, bounded searches, source metadata, expiration, oldest-first quota eviction, and path-traversal rejection.
+- [ ] **Very low priority — Nice to Have:** Use a controlled local HTTP fixture for deterministic integration tests; tests must not depend on public websites.
+- [x] Verify every Local Web Research tool through an MCP SDK `ClientSession` over managed stdio, including initialization, `tools/list`, successful fetch/crawl calls, artifact search/range reads, serialization, and shutdown against a deterministic network-boundary fixture.
+- [ ] **Very low priority — Manual regression:** Verify the package can be discovered, registered, enabled per user, invoked from chat, stopped, and recovered after runtime restart.
+- [x] Add a live-model behavior evaluator that verifies single-page fetch selection, bounded crawl selection and arguments, artifact search/range-read behavior, expected evidence markers, tool-call ceilings, and failed tool calls across configured model IDs. It produces a schema-versioned JSON report; running the environment-specific matrix requires administrator credentials and deterministic publicly reachable fixture URLs.
 - [x] Document installation, configuration, resource requirements, network policy, operational limits, and Raspberry Pi considerations in `examples/managed-mcp/README.md`.
 
 Initial release acceptance criteria:
 
 - `fetch_web_page` reliably returns clean, source-attributed Markdown from supported public HTML pages without executing JavaScript.
 - `crawl_website` traverses only URLs permitted by its origin and policy constraints and cannot exceed server-enforced budgets.
+- Large cleaned results return a bounded preview and opaque artifact metadata; models can search and range-read relevant source text without receiving host paths or an unbounded payload.
+- Expired and quota-evicted artifacts fail predictably, while per-artifact, count, total-byte, read, match, and context ceilings constrain resource use.
 - Requests cannot reach the host, private networks, local MCP/runtime ports, or cloud metadata services.
-- Oversized and unsupported responses fail predictably without exhausting service or model context resources.
+- Oversized source responses are bounded and reported; unsupported responses fail predictably without exhausting service or model context resources.
 - Chromium and search-provider credentials are not required for the initial release.
 
 ## Test matrix
