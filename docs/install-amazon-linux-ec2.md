@@ -395,16 +395,11 @@ make sure the two secure-cookie flags are true and restart Lambda WebUI.
 
 ## 8. Upgrades and backups
 
-Before changing commits, stop both services and back up:
-
-- `/opt/lambda-webui/.env` and `.webui-secret`
-- `/opt/lambda-webui/backend/data/`
-- `/opt/lambda-webui/examples/managed-mcp/calendar-tools/data/`
-- `/home/lambdawebui/.config/open-webui/mcp-runtime.token`
-
-Then update the checkout, rerun the Python dependency installation and
-`npm ci && npm run build`, and restart both services. Do not treat an upstream
-Open WebUI update notification as safe for this customized fork.
+Use the separate [Amazon Linux EC2 refresh runbook](refresh-amazon-linux-ec2.md)
+for backups, safe Git updates, backend and MCP dependency refreshes, frontend
+rebuilds, restarting every required and optional service, validation, and
+rollback. Do not treat an upstream Open WebUI update notification as safe for
+this customized fork.
 
 ## Troubleshooting
 
