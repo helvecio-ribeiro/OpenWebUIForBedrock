@@ -2,14 +2,113 @@
 
 This runbook updates an existing source installation created with
 [Install Lambda WebUI on Amazon Linux 2023](install-amazon-linux-ec2.md). It
-assumes the repository is `/opt/lambda-webui`, the service account is
-`lambdawebui`, and the required systemd units are `lambda-webui` and
-`lambda-webui-mcp`.
+assumes the repository is `/opt/lambda-webui` and the service account is
+`lambdawebui`. Unit names can differ between installations, so resolve them
+before running the remaining commands.
 
 The update is an in-place maintenance operation and causes downtime while the
 frontend and Python environments are rebuilt. For a deployment that cannot
 tolerate downtime, build and validate a replacement EC2 instance, then switch
 the load balancer target.
+
+## Resolve the installed service names
+
+The source-install guide creates `lambda-webui.service` and
+`lambda-webui-mcp.service`. Earlier or manually adapted installations may use
+`open-webui.service` and `open-webui-mcp-runtime.service` instead. Resolve the
+actual system units once in the administrator shell used for the refresh:
+
+```bash
+resolve_system_service() {
+  for candidate in "$@"; do
+    if sudo systemctl cat "$candidate.service" >/dev/null 2>&1; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+WEBUI_SERVICE=$(resolve_system_service lambda-webui open-webui) || {
+  echo "No Lambda/Open WebUI system service was found" >&2
+  exit 1
+}
+
+MCP_SERVICE=$(resolve_system_service lambda-webui-mcp open-webui-mcp-runtime) || {
+  echo "No managed MCP runtime system service was found" >&2
+  exit 1
+}
+
+export WEBUI_SERVICE MCP_SERVICE
+printf 'WebUI service: %s\nMCP runtime service: %s\n' "$WEBUI_SERVICE" "$MCP_SERVICE"
+```
+
+If the MCP lookup fails, inspect both system and user units:
+
+```bash
+sudo systemctl list-unit-files --type=service | grep -E 'lambda-webui|open-webui.*mcp'
+sudo -u lambdawebui XDG_RUNTIME_DIR=/run/user/$(id -u lambdawebui) \
+  systemctl --user list-unit-files --type=service | grep -E 'lambda-webui|open-webui.*mcp'
+```
+
+A user unit named `open-webui-mcp-runtime.service` must be controlled with
+the same `sudo -u lambdawebui XDG_RUNTIME_DIR=... systemctl --user` form, not
+`sudo systemctl`. The repository's example user unit assumes the checkout is
+`~/open-webui`; do not use it unchanged for an `/opt` installation. If neither
+command finds an MCP unit, install the missing system unit directly. First
+confirm that `/opt/lambda-webui/.env` contains `MANAGED_MCP_RUNTIME_URL`,
+`MANAGED_MCP_RUNTIME_TOKEN_FILE`, `MANAGED_MCP_RUNTIME_HOST`,
+`MANAGED_MCP_RUNTIME_PORT`, and `MANAGED_MCP_PACKAGE_ROOTS`, and that the token
+file is readable by `lambdawebui`. Then create the unit:
+
+```bash
+sudo tee /etc/systemd/system/lambda-webui-mcp.service >/dev/null <<'EOF'
+[Unit]
+Description=Lambda WebUI managed MCP runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lambdawebui
+Group=lambdawebui
+WorkingDirectory=/opt/lambda-webui
+EnvironmentFile=/opt/lambda-webui/.env
+Environment=PYTHONPATH=/opt/lambda-webui/backend
+Environment=PATH=/home/lambdawebui/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/lambda-webui/backend/venv/bin/python -m open_webui.mcp_runtime.app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/lambda-webui/backend/data /opt/lambda-webui/examples/managed-mcp /home/lambdawebui
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+Load, enable, and verify it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now lambda-webui-mcp.service
+sudo systemctl status lambda-webui-mcp.service --no-pager
+curl --fail http://127.0.0.1:9090/healthz
+```
+
+If startup fails, inspect:
+
+```bash
+sudo journalctl -u lambda-webui-mcp.service -n 150 --no-pager
+```
+
+After installation succeeds, rerun the service-resolution block so
+`MCP_SERVICE` is set for the rest of the refresh.
+
+The rest of this runbook assumes system units and uses `$WEBUI_SERVICE` and
+`$MCP_SERVICE`. Re-run the resolution block after opening a new shell.
 
 ## 1. Inspect the current installation
 
@@ -20,7 +119,7 @@ uncommitted production edits:
 sudo -u lambdawebui git -C /opt/lambda-webui status --short
 sudo -u lambdawebui git -C /opt/lambda-webui branch --show-current
 sudo -u lambdawebui git -C /opt/lambda-webui rev-parse HEAD
-sudo systemctl status lambda-webui lambda-webui-mcp --no-pager
+sudo systemctl status "$WEBUI_SERVICE" "$MCP_SERVICE" --no-pager
 df -h / /opt /tmp
 df -i / /opt /tmp
 ```
@@ -51,8 +150,8 @@ Stop the application and managed MCP runtime before copying SQLite databases.
 This gives the backup a consistent database state:
 
 ```bash
-sudo systemctl stop lambda-webui
-sudo systemctl stop lambda-webui-mcp
+sudo systemctl stop "$WEBUI_SERVICE"
+sudo systemctl stop "$MCP_SERVICE"
 sudo install -d -m 700 /var/backups/lambda-webui
 sudo tar -C / -czf \
   /var/backups/lambda-webui/lambda-webui-before-refresh-$(date +%Y%m%d-%H%M%S).tar.gz \
@@ -184,25 +283,25 @@ The next frontend refresh must run `npm ci` again.
 
 ## 6. Restart every service
 
-The two required services are:
+The two required services are normally:
 
 - `lambda-webui-mcp`: managed MCP runtime
 - `lambda-webui`: backend and compiled frontend
 
 Local Calendar, Local System Tools, and Local Web Research are child processes
-owned by `lambda-webui-mcp`. Restarting that runtime stops and recreates all
-enabled managed MCP processes. The Calendar REST API on port 8091 is embedded
-in the Local Calendar process; it has no separate systemd unit.
+owned by the unit selected in `$MCP_SERVICE`. Restarting that runtime stops and
+recreates all enabled managed MCP processes. The Calendar REST API on port 8091
+is embedded in the Local Calendar process; it has no separate systemd unit.
 
 Reload systemd only when a unit file or override changed, then restart the MCP
 runtime before the WebUI backend:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl restart lambda-webui-mcp
-sudo systemctl is-active --quiet lambda-webui-mcp
-sudo systemctl restart lambda-webui
-sudo systemctl is-active --quiet lambda-webui
+sudo systemctl restart "$MCP_SERVICE"
+sudo systemctl is-active --quiet "$MCP_SERVICE"
+sudo systemctl restart "$WEBUI_SERVICE"
+sudo systemctl is-active --quiet "$WEBUI_SERVICE"
 ```
 
 Optional services depend on the installation:
@@ -230,18 +329,18 @@ one ordered command block:
 ```bash
 sudo systemctl daemon-reload
 
-for unit in lambda-webui-mcp lambda-webui kokoro-fastapi ollama nginx caddy; do
+for unit in "$MCP_SERVICE" "$WEBUI_SERVICE" kokoro-fastapi ollama nginx caddy; do
   if sudo systemctl cat "$unit.service" >/dev/null 2>&1; then
     echo "Restarting $unit"
     sudo systemctl restart "$unit.service"
   fi
 done
 
-sudo systemctl --no-pager --full status lambda-webui-mcp lambda-webui
+sudo systemctl --no-pager --full status "$MCP_SERVICE" "$WEBUI_SERVICE"
 ```
 
 Do not use `systemctl restart` on a unit name that belongs to an MCP package;
-managed MCP packages are controlled by `lambda-webui-mcp` and the Integrations
+managed MCP packages are controlled by `$MCP_SERVICE` and the Integrations
 administration UI.
 
 ## 7. Validate the refreshed build
@@ -252,8 +351,8 @@ without making an MCP failure mark the WebUI itself unhealthy:
 ```bash
 curl --fail --silent http://127.0.0.1:8080/health
 curl --fail --silent http://127.0.0.1:9090/healthz
-sudo systemctl status lambda-webui lambda-webui-mcp --no-pager
-sudo journalctl -u lambda-webui -u lambda-webui-mcp -n 150 --no-pager
+sudo systemctl status "$WEBUI_SERVICE" "$MCP_SERVICE" --no-pager
+sudo journalctl -u "$WEBUI_SERVICE" -u "$MCP_SERVICE" -n 150 --no-pager
 ```
 
 The backend response should resemble:
@@ -296,8 +395,8 @@ Run that check only when Local Calendar is enabled and ready.
 ## 8. Diagnose a failed refresh
 
 ```bash
-sudo journalctl -u lambda-webui -f
-sudo journalctl -u lambda-webui-mcp -f
+sudo journalctl -u "$WEBUI_SERVICE" -f
+sudo journalctl -u "$MCP_SERVICE" -f
 sudo systemctl --failed
 ss -lntp | grep -E ':(8080|9090|8091|8880|11434)\b'
 df -h / /opt /tmp
@@ -311,10 +410,10 @@ Common causes:
   8 GiB `NODE_OPTIONS` setting and that RAM plus swap can accommodate it.
 - Missing `@sveltejs/kit/src/core/utils.js`: `npm ci` was interrupted, commonly
   because storage ran out. Free or expand storage and rerun `npm ci`.
-- MCPs remain `Unavailable`: verify `lambda-webui-mcp`, port 9090, the token
-  file, and `MANAGED_MCP_RUNTIME_URL` before restarting the backend.
+- MCPs remain `Unavailable`: verify `$MCP_SERVICE`, port 9090, the token file,
+  and `MANAGED_MCP_RUNTIME_URL` before restarting the backend.
 - One MCP is `Failed`: inspect its administrator-visible runtime error and the
-  `lambda-webui-mcp` journal. A package lock or manifest may have changed.
+  `$MCP_SERVICE` journal. A package lock or manifest may have changed.
 - Backend fails during startup: inspect its journal before attempting a
   rollback. Database migrations run during normal backend startup.
 
@@ -326,7 +425,7 @@ MCP environment, and frontend build steps for that commit, then restart and
 validate:
 
 ```bash
-sudo systemctl stop lambda-webui lambda-webui-mcp
+sudo systemctl stop "$WEBUI_SERVICE" "$MCP_SERVICE"
 sudo -u lambdawebui git -C /opt/lambda-webui checkout <previous-commit>
 ```
 
