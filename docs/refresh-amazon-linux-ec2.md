@@ -55,11 +55,43 @@ A user unit named `open-webui-mcp-runtime.service` must be controlled with
 the same `sudo -u lambdawebui XDG_RUNTIME_DIR=... systemctl --user` form, not
 `sudo systemctl`. The repository's example user unit assumes the checkout is
 `~/open-webui`; do not use it unchanged for an `/opt` installation. If neither
-command finds an MCP unit, install the missing system unit directly. First
-confirm that `/opt/lambda-webui/.env` contains `MANAGED_MCP_RUNTIME_URL`,
-`MANAGED_MCP_RUNTIME_TOKEN_FILE`, `MANAGED_MCP_RUNTIME_HOST`,
-`MANAGED_MCP_RUNTIME_PORT`, and `MANAGED_MCP_PACKAGE_ROOTS`, and that the token
-file is readable by `lambdawebui`. Then create the unit:
+command finds an MCP unit, install the missing system unit directly.
+
+Create the shared bearer-token file only when it does not already exist. Do not
+replace a working token during a routine refresh:
+
+```bash
+sudo install -d -o lambdawebui -g lambdawebui -m 700 \
+  /home/lambdawebui/.config/open-webui
+
+if ! sudo test -s /home/lambdawebui/.config/open-webui/mcp-runtime.token; then
+  sudo -u lambdawebui sh -c '
+    umask 077
+    openssl rand -hex 32 > /home/lambdawebui/.config/open-webui/mcp-runtime.token
+  '
+fi
+
+sudo chown lambdawebui:lambdawebui \
+  /home/lambdawebui/.config/open-webui/mcp-runtime.token
+sudo chmod 600 /home/lambdawebui/.config/open-webui/mcp-runtime.token
+sudo -u lambdawebui test -r \
+  /home/lambdawebui/.config/open-webui/mcp-runtime.token
+```
+
+Edit `/opt/lambda-webui/.env` and confirm these values are present exactly once:
+
+```dotenv
+MANAGED_MCP_RUNTIME_URL=http://127.0.0.1:9090
+MANAGED_MCP_RUNTIME_TOKEN_FILE=/home/lambdawebui/.config/open-webui/mcp-runtime.token
+MANAGED_MCP_RUNTIME_HOST=127.0.0.1
+MANAGED_MCP_RUNTIME_PORT=9090
+MANAGED_MCP_PACKAGE_ROOTS=/opt/lambda-webui/examples/managed-mcp
+MANAGED_MCP_ALLOW_ROOT_RUNTIME=false
+```
+
+The token file is read independently by the WebUI backend and the managed MCP
+runtime. Do not paste its contents into logs, shell history, or the browser.
+Then create the unit:
 
 ```bash
 sudo tee /etc/systemd/system/lambda-webui-mcp.service >/dev/null <<'EOF'
