@@ -270,6 +270,82 @@ fit the instance. Do not open port 11434 in the EC2 security group. For a remote
 Ollama server, use its private VPC address and restrict that server's firewall
 to the WebUI instance.
 
+### Kokoro TTS (optional)
+
+Install Kokoro-FastAPI when this instance should provide centralized English,
+Spanish, and Brazilian Portuguese speech synthesis. This is separate from
+browser-side Kokoro.js. On an EC2 host administered through AWS Systems Manager
+Session Manager, use a system service; an SSM shell does not create the user
+systemd bus required by `systemctl --user`.
+
+Install Kokoro as the existing unprivileged service account:
+
+```bash
+sudo -u lambdawebui -H bash -lc '
+  set -e
+  export PATH="$HOME/.local/bin:$PATH"
+  mkdir -p "$HOME/.local/share"
+  git clone \
+    https://github.com/remsky/Kokoro-FastAPI.git \
+    "$HOME/.local/share/kokoro-fastapi"
+  cd "$HOME/.local/share/kokoro-fastapi"
+  uv sync --extra cpu
+  uv run python docker/scripts/download_model.py \
+    --output api/src/models/v1_0
+'
+```
+
+For a repeatable production installation, check out an approved Kokoro-FastAPI
+tag or commit before `uv sync`; do not leave production deployments tracking an
+unreviewed moving branch.
+
+Create `/etc/systemd/system/kokoro-fastapi.service`:
+
+```ini
+[Unit]
+Description=Local Kokoro FastAPI text-to-speech service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lambdawebui
+Group=lambdawebui
+WorkingDirectory=/home/lambdawebui/.local/share/kokoro-fastapi
+Environment=HOME=/home/lambdawebui
+Environment=USE_GPU=false
+Environment=PYTHONPATH=/home/lambdawebui/.local/share/kokoro-fastapi:/home/lambdawebui/.local/share/kokoro-fastapi/api
+Environment=MODEL_DIR=src/models
+Environment=VOICES_DIR=src/voices/v1_0
+Environment=WEB_PLAYER_PATH=/home/lambdawebui/.local/share/kokoro-fastapi/web
+ExecStart=/home/lambdawebui/.local/bin/uv run --no-sync uvicorn api.src.main:app --host 127.0.0.1 --port 8880
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Configure Lambda WebUI to use the host-local API:
+
+```dotenv
+FORCE_AUDIO_TTS_CONFIG=true
+AUDIO_TTS_ENGINE=openai
+AUDIO_TTS_OPENAI_API_BASE_URL=http://127.0.0.1:8880/v1
+AUDIO_TTS_OPENAI_API_KEY=not-needed
+AUDIO_TTS_MODEL=kokoro
+AUDIO_TTS_VOICE=bf_emma
+AUDIO_TTS_DEFAULT_LANGUAGE=en
+AUDIO_TTS_LANGUAGE_VOICES='{"en":"bf_emma","es":"ef_dora","pt":"pf_dora"}'
+AUDIO_TTS_PRELOAD_VOICES=bf_emma,ef_dora,pf_dora
+AUDIO_TTS_OPENAI_PARAMS='{"response_format":"mp3","speed":1.0}'
+ENABLE_KOKORO_PRELOAD=false
+```
+
+`ENABLE_KOKORO_PRELOAD=false` prevents browser-side Kokoro.js from overriding
+the centralized API selection. Keep port 8880 bound to loopback; the WebUI
+backend proxies speech requests for remote browsers.
+
 ## 4. Install the managed local MCP runtime
 
 Generate the shared bearer token:
@@ -359,14 +435,39 @@ ReadWritePaths=/opt/lambda-webui/backend/data /opt/lambda-webui/examples/managed
 WantedBy=multi-user.target
 ```
 
-Start and verify both services:
+Start and verify the required services and Kokoro when it was installed:
 
 ```bash
 sudo systemctl daemon-reload
+if sudo systemctl cat kokoro-fastapi.service >/dev/null 2>&1; then
+  sudo systemctl enable --now kokoro-fastapi.service
+fi
 sudo systemctl enable --now lambda-webui-mcp lambda-webui
 sudo systemctl status lambda-webui lambda-webui-mcp --no-pager
 curl --fail http://127.0.0.1:8080/health
 sudo journalctl -u lambda-webui -u lambda-webui-mcp -n 100 --no-pager
+```
+
+When Kokoro was installed, verify its voices and synthesize a sample before
+testing through the WebUI:
+
+```bash
+curl --fail --silent http://127.0.0.1:8880/v1/audio/voices
+curl --fail --silent --show-error --max-time 120 \
+  http://127.0.0.1:8880/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"kokoro","voice":"bf_emma","input":"Kokoro is ready.","response_format":"mp3","speed":1}' \
+  -o /tmp/kokoro-smoke-test.mp3
+file /tmp/kokoro-smoke-test.mp3
+test -s /tmp/kokoro-smoke-test.mp3
+```
+
+If Kokoro does not start, use system-level commands from the SSM session:
+
+```bash
+sudo systemctl status kokoro-fastapi.service --no-pager
+sudo journalctl -u kokoro-fastapi.service -n 150 --no-pager
+ss -lntp | grep ':8880'
 ```
 
 ## 6. Put HTTPS in front of the service

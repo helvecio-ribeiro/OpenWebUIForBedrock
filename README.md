@@ -12,6 +12,11 @@ The upstream project provides the core chat application, frontend, Ollama integr
 
 For upstream features, configuration, and general troubleshooting, see the [Open WebUI repository](https://github.com/open-webui/open-webui) and [Open WebUI documentation](https://docs.openwebui.com/).
 
+To connect a private or hosted endpoint that implements the OpenAI v1 Chat
+Completions schema, see [OpenAI-compatible model connections](docs/openai-compatible-connections.md).
+The guide covers bearer authentication, automatic `/v1/models` discovery, and
+the less-visible **Advanced → Model IDs** flow for registering models individually.
+
 Because this repository contains changes that are not maintained as a directly upgradeable upstream fork, the example configuration disables Open WebUI release checks:
 
 ```dotenv
