@@ -6,6 +6,14 @@ This fork is branded as **Lambda WebUI**. Its canonical vector mark is `static/b
 
 It also adds a per-user **Browser** (internally called Web Panels): persistent browser-like tabs that replace the main Chat content while selected. Select **New Tab**, enter a public HTTP(S) address, and optionally rename it. Tabs support back, forward, reload, individual deletion, and Select/bulk deletion. Remote pages are fetched through a signed, panel-scoped backend proxy, their navigable resources are rewritten, and they run inside an origin-isolated sandbox. Selecting page text exposes **Explain Text**, **Find Bias**, and **Challenge Text** actions; **Summarize Page** is available from the same Panel Actions popup. These actions invoke the user's currently selected model, inherit the user's and model's enabled MCP services, complete server-side MCP calls synchronously, and display the final result over the page. Copying a selection-based result includes both the highlighted passage and the model's response. Private/local network destinations, embedded URL credentials, nonstandard ports, oversized responses, and non-HTTP protocols are rejected. Complex authentication, DRM, service workers, anti-bot systems, and JavaScript that depends strongly on the original origin may still be incompatible; the Browser is an integrated research surface, not a complete replacement for Chrome.
 
+Administrators can disable the entire Browser capability with
+`ENABLE_WEB_PANELS=false`. This hides its UI, redirects direct Browser routes,
+and makes the backend panel and proxy endpoints unavailable while preserving
+existing panel records. Browser sidebar controls are hidden by default for
+every user. When the capability is enabled, each user can opt in under **User
+Settings → Interface → Show Browser in Sidebar**; that preference cannot
+override an administrator disablement.
+
 Administrators can configure a **Global System Prompt** under **Admin Panel → Settings → General → Global Model Instructions**. The backend applies it to every model request—including regular chats, Browser Panel Actions, API-originated requests, and internal/background model requests. It is stored independently and is not copied into a user's System Prompt setting. For chats in a folder, the stable prompt order is **administrator prompt → user prompt → folder prompt**, followed by any model-, tool-, or feature-specific context. Leaving any layer empty simply omits that layer; leaving the administrator field empty disables the global prompt.
 
 The upstream project provides the core chat application, frontend, Ollama integration, OpenAI-compatible providers, and general documentation. This fork adds Bedrock discovery and invocation through the Converse APIs. It also makes hands-free conversations more reliable by tightening microphone activation, making TTS playback deterministic, supporting centrally enforced TTS settings, and providing a low-latency local Kokoro deployment path.

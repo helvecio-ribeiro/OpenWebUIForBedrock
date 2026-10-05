@@ -215,7 +215,13 @@ WEBUI_SESSION_COOKIE_SECURE=true
 WEBUI_AUTH_COOKIE_SECURE=true
 FORWARDED_ALLOW_IPS=127.0.0.1
 ENABLE_VERSION_UPDATE_CHECK=false
+ENABLE_WEB_PANELS=true
 ```
+
+Set `ENABLE_WEB_PANELS=false` when the deployment must not expose the integrated
+Browser, its server-side proxy, or Browser Actions. When enabled, individual
+users may opt in to the Browser section from their own Interface settings; it
+is hidden by default.
 
 Do not include angle brackets around the actual secret. For an initial test
 without a reverse proxy, set `HOST=0.0.0.0`, use

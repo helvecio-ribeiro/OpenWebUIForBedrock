@@ -96,6 +96,7 @@
 	import WebPanels from './Sidebar/WebPanels.svelte';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 	import { createWebPanel } from '$lib/apis/webPanels';
+	import { shouldShowWebPanels } from '$lib/utils/webPanelActions';
 
 	const BREAKPOINT = 768;
 	const DEFAULT_PINNED_ITEMS = [];
@@ -133,6 +134,11 @@
 	let showChatsMenu = false;
 	let showBatchDeleteConfirm = false;
 	let batchOperationPending = false;
+
+	$: webPanelsVisible = shouldShowWebPanels(
+		$config?.features?.enable_web_panels ?? false,
+		$settings?.showWebPanels
+	);
 
 	const finishBatchOperation = async () => {
 		const activeWasSelected = $selectedChatIds.includes($chatId);
@@ -849,6 +855,7 @@
 	};
 
 	const newWebPanelHandler = async () => {
+		if (!webPanelsVisible) return;
 		const panel = await createWebPanel(localStorage.token).catch((error) => {
 			toast.error(`${error}`);
 			return null;
@@ -1028,21 +1035,23 @@
 					</Tooltip>
 				</div>
 
-				<div class="">
-					<Tooltip content="New Tab" placement="right">
-						<button
-							class="cursor-pointer flex size-8 items-center justify-center transition group"
-							on:click|stopPropagation={newWebPanelHandler}
-							aria-label="New Tab"
-						>
-							<div
-								class="self-center flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
+				{#if webPanelsVisible}
+					<div class="">
+						<Tooltip content="New Tab" placement="right">
+							<button
+								class="cursor-pointer flex size-8 items-center justify-center transition group"
+								on:click|stopPropagation={newWebPanelHandler}
+								aria-label="New Tab"
 							>
-								<GlobeAlt className="size-4" />
-							</div>
-						</button>
-					</Tooltip>
-				</div>
+								<div
+									class="self-center flex size-[30px] items-center justify-center rounded-lg transition group-hover:bg-gray-50 dark:group-hover:bg-gray-900"
+								>
+									<GlobeAlt className="size-4" />
+								</div>
+							</button>
+						</Tooltip>
+					</div>
+				{/if}
 
 				<div>
 					<Tooltip content={$i18n.t('Search')} placement="right">
@@ -1254,21 +1263,23 @@
 						</a>
 					</div>
 
-					<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
-						<button
-							id="sidebar-new-web-panel-button"
-							class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
-							on:click={newWebPanelHandler}
-							aria-label="New Tab"
-						>
-							<div class="self-center flex size-4 shrink-0 items-center justify-center">
-								<GlobeAlt className="size-4" />
-							</div>
-							<div class="flex flex-1 self-center translate-y-[0.5px]">
-								<div class="self-center text-[13px] leading-5">New Tab</div>
-							</div>
-						</button>
-					</div>
+					{#if webPanelsVisible}
+						<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
+							<button
+								id="sidebar-new-web-panel-button"
+								class="group grow flex items-center space-x-2 rounded-xl px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900 transition outline-none"
+								on:click={newWebPanelHandler}
+								aria-label="New Tab"
+							>
+								<div class="self-center flex size-4 shrink-0 items-center justify-center">
+									<GlobeAlt className="size-4" />
+								</div>
+								<div class="flex flex-1 self-center translate-y-[0.5px]">
+									<div class="self-center text-[13px] leading-5">New Tab</div>
+								</div>
+							</button>
+						</div>
+					{/if}
 
 					<div class="px-1 flex justify-center text-gray-700 dark:text-gray-300">
 						<button
@@ -1756,7 +1767,9 @@
 						</div>
 					</div>
 				</SidebarSection>
-				<WebPanels />
+				{#if webPanelsVisible}
+					<WebPanels />
+				{/if}
 			</div>
 
 			<div class="px-1 pt-1 pb-1.5 sticky bottom-0 z-10 -mt-2 sidebar">

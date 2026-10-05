@@ -1145,6 +1145,10 @@ if OFFLINE_MODE:
 
 ENABLE_PYODIDE_FILE_PERSISTENCE = os.getenv('ENABLE_PYODIDE_FILE_PERSISTENCE', 'false').lower() == 'true'
 
+# Browser/Web Panels are an installation-wide capability. The frontend also
+# offers a per-user visibility preference, but it cannot override this gate.
+ENABLE_WEB_PANELS = os.getenv('ENABLE_WEB_PANELS', 'true').lower() == 'true'
+
 ####################################
 # Audit logging
 ####################################

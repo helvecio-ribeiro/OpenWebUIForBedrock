@@ -16,6 +16,19 @@ from open_webui.utils.web_panel_proxy import (
 )
 
 
+def test_installation_gate_rejects_web_panel_requests_when_disabled(monkeypatch):
+    monkeypatch.setattr(router, 'ENABLE_WEB_PANELS', False)
+    with pytest.raises(router.HTTPException) as error:
+        router.require_web_panels_enabled()
+    assert error.value.status_code == 404
+    assert error.value.detail == 'Browser panels are disabled'
+
+
+def test_installation_gate_allows_web_panel_requests_when_enabled(monkeypatch):
+    monkeypatch.setattr(router, 'ENABLE_WEB_PANELS', True)
+    assert router.require_web_panels_enabled() is None
+
+
 @pytest.mark.parametrize(
     'url',
     [

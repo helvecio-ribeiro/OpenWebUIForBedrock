@@ -373,6 +373,10 @@
 	};
 
 	onMount(() => {
+		if (!$config?.features?.enable_web_panels) {
+			void goto('/');
+			return;
+		}
 		mounted = true;
 		void loadEmbeddedLogo().catch((error) =>
 			console.warn('Unable to preload the Lambda clipboard logo:', error)

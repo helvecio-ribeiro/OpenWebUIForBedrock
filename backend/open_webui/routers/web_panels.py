@@ -5,7 +5,7 @@ import aiohttp
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import Response
-from open_webui.env import WEBUI_SECRET_KEY
+from open_webui.env import ENABLE_WEB_PANELS, WEBUI_SECRET_KEY
 from open_webui.internal.db import get_async_session
 from open_webui.models.web_panels import WebPanelModel, WebPanels
 from open_webui.utils.auth import get_verified_user
@@ -23,7 +23,13 @@ from open_webui.utils.web_panel_proxy import (
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter()
+
+def require_web_panels_enabled() -> None:
+    if not ENABLE_WEB_PANELS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='Browser panels are disabled')
+
+
+router = APIRouter(dependencies=[Depends(require_web_panels_enabled)])
 
 # Some public sites, notably Yahoo Finance, send Content-Security-Policy headers
 # larger than aiohttp's 8,190-byte default. Keep the allowance scoped to the Web

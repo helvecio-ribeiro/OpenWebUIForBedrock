@@ -236,6 +236,7 @@ type Settings = {
 	highContrastMode?: boolean;
 	title?: TitleSettings;
 	showChatTitleInTab?: boolean;
+	showWebPanels?: boolean;
 	splitLargeDeltas?: boolean;
 	chatDirection?: 'LTR' | 'RTL' | 'auto';
 	ctrlEnterToSend?: boolean;
@@ -303,6 +304,7 @@ type Config = {
 		enable_signup: boolean;
 		enable_login_form: boolean;
 		enable_web_search?: boolean;
+		enable_web_panels?: boolean;
 		enable_web_search_confirmation?: boolean;
 		web_search_confirmation_content?: string;
 		enable_google_drive_integration: boolean;

@@ -3,8 +3,18 @@ import { describe, expect, it } from 'vitest';
 import {
 	isMatchingWebPanelCapture,
 	normalizeChallengeResult,
+	shouldShowWebPanels,
 	withWebPanelTemporalContext
 } from './webPanelActions';
+
+describe('shouldShowWebPanels', () => {
+	it('requires the administrator capability and respects the user visibility preference', () => {
+		expect(shouldShowWebPanels(true, true)).toBe(true);
+		expect(shouldShowWebPanels(true, undefined)).toBe(false);
+		expect(shouldShowWebPanels(true, false)).toBe(false);
+		expect(shouldShowWebPanels(false, true)).toBe(false);
+	});
+});
 
 describe('isMatchingWebPanelCapture', () => {
 	const pending = { requestId: 'capture-1', generation: 4 };

@@ -73,6 +73,7 @@
 	let expandDetails = true;
 	let renderMarkdownInPreviews = true;
 	let showChatTitleInTab = true;
+	let showWebPanels = false;
 
 	let showFloatingActionButtons = true;
 	let floatingActionButtons = null;
@@ -261,6 +262,7 @@
 		chatDirection = $settings?.chatDirection ?? 'auto';
 		userLocation = $settings?.userLocation ?? false;
 		showChatTitleInTab = $settings?.showChatTitleInTab ?? true;
+		showWebPanels = $settings?.showWebPanels ?? false;
 
 		iframeSandboxAllowSameOrigin = $settings?.iframeSandboxAllowSameOrigin ?? false;
 		iframeSandboxAllowForms = $settings?.iframeSandboxAllowForms ?? false;
@@ -454,6 +456,30 @@
 					{$i18n.t('Increase contrast for controls and input surfaces.')}
 				</p>
 			</div>
+
+			{#if $config?.features?.enable_web_panels}
+				<div>
+					<div class={settingRowClass}>
+						<div id="show-browser-sidebar-label" class={settingLabelClass}>
+							{$i18n.t('Show Browser in Sidebar')}
+						</div>
+
+						<div class={settingControlClass}>
+							<Switch
+								ariaLabelledbyId="show-browser-sidebar-label"
+								tooltip={true}
+								bind:state={showWebPanels}
+								on:change={() => {
+									saveSettings({ showWebPanels });
+								}}
+							/>
+						</div>
+					</div>
+					<p class={settingDescriptionClass}>
+						{$i18n.t('Show Browser tabs and the New Tab control in the sidebar.')}
+					</p>
+				</div>
+			{/if}
 
 			<div>
 				<div class={settingRowClass}>

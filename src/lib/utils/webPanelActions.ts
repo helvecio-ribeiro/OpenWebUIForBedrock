@@ -11,6 +11,10 @@ export type PendingWebPanelCapture = {
 	generation: number;
 };
 
+/** Admin capability is authoritative; users may only hide an enabled feature. */
+export const shouldShowWebPanels = (adminEnabled: boolean, userVisible?: boolean) =>
+	adminEnabled && userVisible === true;
+
 /** Reject stale, unsolicited, and cross-navigation Browser capture responses. */
 export const isMatchingWebPanelCapture = (
 	pending: PendingWebPanelCapture | null,
