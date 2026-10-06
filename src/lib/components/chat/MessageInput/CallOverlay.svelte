@@ -14,6 +14,10 @@
 		isVoiceExitCommand,
 		VOICE_EXIT_ACKNOWLEDGEMENT
 	} from '$lib/utils/tts';
+	import {
+		shouldRestoreVoiceListening,
+		type VoiceTranscriptionOutcome
+	} from '$lib/utils/voiceTurn';
 
 	import { toast } from 'svelte-sonner';
 
@@ -180,11 +184,18 @@
 	const MIN_SPEECH_RMS = 0.018;
 	const NOISE_FLOOR_MULTIPLIER = 2.8;
 
-	const transcribeHandler = async (audioBlob, extension = 'webm') => {
+	let voiceTurnSequence = 0;
+	let activeVoiceTurn = 0;
+
+	const transcribeHandler = async (
+		audioBlob: Blob,
+		turnId: number,
+		extension = 'webm'
+	): Promise<VoiceTranscriptionOutcome> => {
 		// Create a blob from the audio chunks
 		if (!audioBlob || audioBlob.size < 100) {
 			console.log('Audio blob too small or empty, skipping transcription');
-			return;
+			return 'empty';
 		}
 
 		await tick();
@@ -198,6 +209,10 @@
 			toast.error(`${error}`);
 			return null;
 		});
+
+		if (!res || turnId !== activeVoiceTurn || !$showCallOverlay) {
+			return 'failed';
+		}
 
 		if (res) {
 			console.log(res.text);
@@ -230,13 +245,22 @@
 						assistantSpeaking = false;
 						closeVoiceMode();
 					}
-					return;
+					return 'exit';
 				}
 
-				const _responses = await submitPrompt(res.text, []);
-				console.log(_responses);
+				try {
+					const accepted = await submitPrompt(res.text, []);
+					console.log(accepted);
+					return accepted === true ? 'submitted' : 'failed';
+				} catch (error) {
+					console.error('Voice prompt submission failed:', error);
+					toast.error(`${error}`);
+					return 'failed';
+				}
 			}
 		}
+
+		return 'empty';
 	};
 
 	const stopRecordingCallback = async (_continue = true) => {
@@ -251,11 +275,9 @@
 			audioContainerHeader = null;
 			mediaRecorder = false;
 
-			if (_continue) {
-				startRecording();
-			}
-
 			if (confirmed) {
+				const turnId = ++voiceTurnSequence;
+				activeVoiceTurn = turnId;
 				loading = true;
 				emoji = null;
 
@@ -273,12 +295,23 @@
 				const type = _audioChunks[0]?.type || 'audio/webm';
 				const extension = type.split('/')[1]?.split(';')[0] || 'webm';
 				const audioBlob = new Blob(_audioChunks, { type });
+				let outcome: VoiceTranscriptionOutcome = 'failed';
 				try {
-					await transcribeHandler(audioBlob, extension);
+					outcome = await transcribeHandler(audioBlob, turnId, extension);
 				} finally {
 					confirmed = false;
-					loading = false;
+					if (turnId === activeVoiceTurn && outcome !== 'submitted') loading = false;
 				}
+
+				if (
+					turnId === activeVoiceTurn &&
+					_continue &&
+					shouldRestoreVoiceListening(outcome, $showCallOverlay)
+				) {
+					await restoreListeningState();
+				}
+			} else if (_continue && !assistantSpeaking && !loading) {
+				await restoreListeningState();
 			}
 		} else {
 			audioChunks = [];
@@ -857,6 +890,7 @@
 		const { id } = e.detail;
 
 		chatStreaming = true;
+		loading = false;
 
 		if (currentMessageId !== id) {
 			console.log(`Received chat start event for message ID ${id}`);

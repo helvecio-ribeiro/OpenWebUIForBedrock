@@ -2619,38 +2619,38 @@
 
 		if (String(userPrompt).trim() === '/compact') {
 			await handleManualCompact();
-			return;
+			return false;
 		}
 		if (String(userPrompt).trim() === '/status') {
 			handleStatusCommand();
-			return;
+			return false;
 		}
 		if (String(userPrompt).trim() === '/fork') {
 			await handleForkChat();
-			return;
+			return false;
 		}
 
 		if (pendingOAuthTools.length > 0) {
 			toast.warning($i18n.t('Please connect all required integrations before sending a message'));
-			return;
+			return false;
 		}
 		if (userPrompt === '' && files.length === 0) {
 			toast.error($i18n.t('Please enter a prompt'));
-			return;
+			return false;
 		}
 		if (selectedModels.includes('')) {
 			toast.error($i18n.t('Model not selected'));
-			return;
+			return false;
 		}
 		const form = getChatVariablesForm(selectedModelIds, chatVariables, $models);
 		if (form.conflicts.length > 0) {
 			showChatVariablesModal = true;
 			toast.error($i18n.t('Chat Variables have conflicting model definitions'));
-			return;
+			return false;
 		}
 		if (form.missing || form.empty) {
 			showChatVariablesModal = true;
-			return;
+			return false;
 		}
 
 		if (
@@ -2660,7 +2660,7 @@
 			toast.error(
 				$i18n.t(`Oops! There are files still uploading. Please wait for the upload to complete.`)
 			);
-			return;
+			return false;
 		}
 
 		if (
@@ -2672,7 +2672,7 @@
 					maxCount: $config?.file?.max_count
 				})
 			);
-			return;
+			return false;
 		}
 
 		if (
@@ -2682,7 +2682,7 @@
 		) {
 			pendingWebSearchPrompt = userPrompt ?? '';
 			openWebSearchConfirm();
-			return;
+			return false;
 		}
 
 		// Check if the assistant is still generating the main response
@@ -2702,7 +2702,7 @@
 				messageInput?.setText('');
 				prompt = '';
 				files = [];
-				return;
+				return true;
 			} else {
 				// Interrupt: stop current generation and proceed
 				await stopResponse();
@@ -2716,7 +2716,7 @@
 			if (currentMessage.error && !currentMessage.content) {
 				// Error in response
 				toast.error($i18n.t(`Oops! There was an error in the previous response.`));
-				return;
+				return false;
 			}
 		}
 
@@ -2728,6 +2728,7 @@
 		messageInput?.setText('');
 
 		await submitPrompt(userPrompt, _files);
+		return true;
 	};
 
 	const sendMessage = async (
